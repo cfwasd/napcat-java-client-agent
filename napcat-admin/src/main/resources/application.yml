@@ -10,7 +10,7 @@ napcat:
 
   bot:
     self-id: 1994463852
-    command-prefix: "/"
+    command-prefix: ""
     ignore-self-message: true
 
   llm:

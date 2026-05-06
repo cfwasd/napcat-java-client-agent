@@ -59,7 +59,10 @@ public class HandlerRegistry implements BotDispatcher {
     }
 
     public void registerBean(Object bean) {
-        Class<?> clazz = bean.getClass();
+        registerBean(bean, bean.getClass());
+    }
+
+    public void registerBean(Object bean, Class<?> clazz) {
         for (Method method : clazz.getDeclaredMethods()) {
             registerAnnotatedMethod(bean, method);
         }

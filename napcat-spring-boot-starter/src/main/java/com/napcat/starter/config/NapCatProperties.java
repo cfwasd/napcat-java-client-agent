@@ -60,7 +60,7 @@ public class NapCatProperties {
     @Data
     public static class BotProperties {
         private long selfId = 0;
-        private String commandPrefix = "/";
+        private String commandPrefix = "";
         private boolean atMeTrigger = true;
         private boolean ignoreSelfMessage = true;
         private List<Long> superUsers = new ArrayList<>();
