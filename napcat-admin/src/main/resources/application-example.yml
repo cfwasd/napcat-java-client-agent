@@ -32,7 +32,8 @@ napcat:
     max-react-rounds: 5
     system-prompt: "你是一个有用的 QQ 机器人助手。"
     show-tool-process: true          # 将工具调用过程发送到群聊
-    max-history-messages: 40         # 会话历史截断上限
+    session-ttl: 7200  # 延长到 2 小时
+    max-history-messages: 40  # 保持最近 40 条消息
     builtin:
       web-search:
         enabled: true

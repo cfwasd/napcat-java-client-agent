@@ -26,26 +26,12 @@ public class SessionManager {
     }
 
     /**
-     * 获取或创建会话。原子操作，消除 check-then-act 竞态条件。
+     * 获取或创建会话。使用 computeIfAbsent 确保原子操作。
      */
     public Session get(SessionKey key) {
-        Session existing = sessions.get(key);
-        if (existing != null && !existing.isExpired(ttlSeconds)) {
-            return existing;
-        }
-
-        // 过期或不存在 → 原子创建新会话
-        Session newSession = new Session(key, maxHistoryMessages);
-        Session old = sessions.put(key, newSession);
-        if (old != null && !old.isExpired(ttlSeconds)) {
-            // 另一个线程抢先创建了有效会话，恢复它
-            sessions.put(key, old);
-            return old;
-        }
-        if (old != null) {
-            log.debug("Session expired and replaced for key: {}", key);
-        }
-        return newSession;
+        return sessions.computeIfAbsent(key, k -> {
+            return new Session(k, maxHistoryMessages);
+        });
     }
 
     /**
@@ -60,8 +46,10 @@ public class SessionManager {
      * 清除指定会话。
      */
     public void clear(SessionKey key) {
-        sessions.remove(key);
-        log.debug("Session cleared: {}", key);
+        Session removed = sessions.remove(key);
+        if (removed != null) {
+            log.debug("Session cleared: {}", key);
+        }
     }
 
     /**

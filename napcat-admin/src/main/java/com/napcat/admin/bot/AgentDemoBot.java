@@ -2,6 +2,7 @@ package com.napcat.admin.bot;
 
 import com.napcat.agent.agent.AgentConfig;
 import com.napcat.agent.agent.NapCatAgent;
+import com.napcat.agent.session.SessionKey;
 import com.napcat.core.annotation.MentionFilter;
 import com.napcat.core.annotation.OnGroupMessage;
 import com.napcat.core.annotation.OnPrivateMessage;
@@ -10,6 +11,7 @@ import com.napcat.core.config.BotProperties;
 import com.napcat.core.event.GroupMessageEvent;
 import com.napcat.core.message.MessageChain;
 import jakarta.annotation.PostConstruct;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
@@ -18,6 +20,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Component
+@Slf4j
 public class AgentDemoBot {
 
     @Autowired(required = false)
@@ -42,6 +45,8 @@ public class AgentDemoBot {
     @OnPrivateMessage
     @MentionFilter
     public void onAt(GroupMessageEvent event) {
+
+
         if (agent == null) return;
         String plainText = event.getMessage().toPlainText();
 
@@ -59,6 +64,8 @@ public class AgentDemoBot {
     @WakeFilter
     public void notAt(GroupMessageEvent event) {
         if (agent == null) return;
+
+
         String plainText = event.getMessage().toPlainText();
 
         // 剔除唤醒关键词
