@@ -9,7 +9,7 @@ napcat:
       token: "token"
 
   bot:
-    self-id: 1994463852
+    self-id: 机器人qq号
     command-prefix: ""
     ignore-self-message: true
 
