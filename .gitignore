@@ -27,3 +27,5 @@ Thumbs.db
 *.zip
 *.tar.gz
 *.rar
+
+napcat-admin/src/main/resources/application.yml
