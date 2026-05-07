@@ -56,8 +56,17 @@ public class EventDecoder {
             }
         };
         if (event != null) {
-            log.info("Decoded event: post_type={}, event_type={}, self_id={}",
-                    postType, event.getClass().getSimpleName(), event.getSelfId());
+            // 心跳事件使用 DEBUG 级别，其他元事件和生命周期事件也使用 DEBUG
+            if (event instanceof HeartbeatEvent) {
+                log.debug("Decoded heartbeat event: self_id={}", event.getSelfId());
+            } else if (event instanceof MetaEvent || event instanceof LifecycleEvent) {
+                log.debug("Decoded meta/lifecycle event: type={}, self_id={}", 
+                        event.getClass().getSimpleName(), event.getSelfId());
+            } else {
+                // 消息、通知、请求等实际业务事件使用 INFO 级别
+                log.info("Decoded event: type={}, self_id={}", 
+                        event.getClass().getSimpleName(), event.getSelfId());
+            }
         }
         return event;
     }

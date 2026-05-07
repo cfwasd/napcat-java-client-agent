@@ -221,18 +221,35 @@ public class HandlerRegistry implements BotDispatcher {
     @SuppressWarnings("unchecked")
     public List<HandlerResult> dispatch(OB11Event event) {
         List<HandlerResult> results = new ArrayList<>();
-        log.info("Dispatching event to handlers: eventClass={}, registeredCommands={}, registeredHandlers={}, registeredEventHandlers={}",
-                event.getClass().getSimpleName(), commands.size(), handlers.size(), eventHandlers.size());
+        
+        // 只记录非心跳事件的调度信息，且使用 DEBUG 级别
+        if (!(event instanceof com.napcat.core.event.HeartbeatEvent)) {
+            log.debug("Dispatching event: class={}, handlers={}, commands={}",
+                    event.getClass().getSimpleName(), handlers.size(), commands.size());
+        }
 
         // 1. 命令匹配（消息事件）
         if (event instanceof MessageEvent msgEvent) {
             String plainText = msgEvent.getPlainText();
-            log.info("Matching commands against plainText: '{}'", plainText);
+            
+            // 打印收到的消息详情
+            if (msgEvent instanceof GroupMessageEvent groupEvent) {
+                String senderName = groupEvent.getSender() != null ? groupEvent.getSender().getNickname() : "未知";
+                long senderId = groupEvent.getUserId();
+                long groupId = groupEvent.getGroupId();
+                log.info("群聊 [{}] [{}({})] {}", groupId, senderName, senderId, plainText);
+            } else if (msgEvent instanceof com.napcat.core.event.PrivateMessageEvent privateEvent) {
+                String senderName = privateEvent.getSender() != null ? privateEvent.getSender().getNickname() : "未知";
+                long senderId = privateEvent.getUserId();
+                log.info("私聊 [{}({})] {}", senderName, senderId, plainText);
+            }
+            
+            // 命令匹配逻辑
             for (CommandEntry entry : commands.values()) {
                 if (entry.filter != null && !entry.filter.test(msgEvent)) continue;
                 CommandHandler.CommandArgs args = matchCommand(entry.template, plainText);
                 if (args != null) {
-                    log.info("Command matched: template={}, args={}", entry.template, args);
+                    log.info("命令匹配成功: 模板='{}', 消息='{}', 参数={}", entry.template, plainText, args);
                     try {
                         entry.handler.accept(msgEvent, args);
                         results.add(new HandlerResult(true, null));
@@ -246,7 +263,6 @@ public class HandlerRegistry implements BotDispatcher {
                     }
                 }
             }
-            log.info("No command matched for text: '{}'", plainText);
         }
 
         // 2. 注解 handler 匹配
@@ -255,10 +271,17 @@ public class HandlerRegistry implements BotDispatcher {
                 .filter(h -> h.condition == null || h.condition.test(event))
                 .sorted(Comparator.comparingInt(HandlerEntry::priority))
                 .toList();
-        log.info("Matched annotation handlers: count={}", matchedHandlers.size());
+        
+        if (!matchedHandlers.isEmpty() && !(event instanceof com.napcat.core.event.HeartbeatEvent)) {
+            log.debug("Matched annotation handlers: count={}", matchedHandlers.size());
+        }
+        
         for (HandlerEntry<?> h : matchedHandlers) {
             try {
-                log.info("Executing annotation handler: eventType={}, priority={}", h.eventType.getSimpleName(), h.priority);
+                if (!(event instanceof com.napcat.core.event.HeartbeatEvent)) {
+                    log.debug("Executing annotation handler: eventType={}, priority={}", 
+                            h.eventType.getSimpleName(), h.priority);
+                }
                 ((Consumer<OB11Event>) h.executor).accept(event);
                 results.add(new HandlerResult(true, null));
             } catch (StopRoutingException sre) {
@@ -273,8 +296,10 @@ public class HandlerRegistry implements BotDispatcher {
 
         // 3. 接口 handler 匹配
         List<Consumer<OB11Event>> consumers = eventHandlers.get(event.getClass());
-        if (consumers != null) {
-            log.info("Matched interface handlers: count={}", consumers.size());
+        if (consumers != null && !consumers.isEmpty()) {
+            if (!(event instanceof com.napcat.core.event.HeartbeatEvent)) {
+                log.debug("Matched interface handlers: count={}", consumers.size());
+            }
             consumers.forEach(c -> {
                 try {
                     c.accept(event);
@@ -288,7 +313,9 @@ public class HandlerRegistry implements BotDispatcher {
 
         // 4. 兜底 handler（at-me-trigger 等）
         if (results.isEmpty() && fallbackHandler != null) {
-            log.info("No handler matched, invoking fallback handler");
+            if (!(event instanceof com.napcat.core.event.HeartbeatEvent)) {
+                log.debug("No handler matched, invoking fallback handler");
+            }
             try {
                 fallbackHandler.accept(event);
                 results.add(new HandlerResult(true, null));
@@ -298,8 +325,10 @@ public class HandlerRegistry implements BotDispatcher {
             }
         }
 
-        log.info("Dispatch completed: successCount={}, totalHandlers={}",
-                results.stream().filter(HandlerResult::success).count(), results.size());
+        if (!(event instanceof com.napcat.core.event.HeartbeatEvent) && !results.isEmpty()) {
+            log.debug("Dispatch completed: successCount={}, totalHandlers={}",
+                    results.stream().filter(HandlerResult::success).count(), results.size());
+        }
         return results;
     }
 

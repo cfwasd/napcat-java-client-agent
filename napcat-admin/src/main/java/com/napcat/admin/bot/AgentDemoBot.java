@@ -41,7 +41,6 @@ public class AgentDemoBot {
     @OnGroupMessage
     @OnPrivateMessage
     @MentionFilter
-    @WakeFilter
     public void onAt(GroupMessageEvent event) {
         if (agent == null) return;
         String plainText = event.getMessage().toPlainText();
