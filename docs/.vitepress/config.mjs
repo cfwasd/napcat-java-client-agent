@@ -5,6 +5,7 @@ export default defineConfig({
   title: 'NapCat Java SDK',
   description: '基于 NapCat OneBot11 协议的 Java Bot 开发框架，集成 AI Agent 能力',
   lang: 'zh-CN',
+  base: '/napcat-java-client-agent/',
 
   head: [
     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/logo.svg' }],
