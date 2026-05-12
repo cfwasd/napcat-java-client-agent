@@ -17,8 +17,8 @@
 ### 1. 克隆并安装到本地
 
 ```bash
-git clone https://github.com/cfwasd/napcat-java-client-agent.git
-cd napcat-java-client-agent
+git clone https://github.com/cfwasd/napcat-java-agent.git
+cd napcat-java-agent
 mvn install -DskipTests
 ```
 
@@ -82,7 +82,7 @@ public class HelloBot {
 
 ## 文档
 
-在线文档站：https://cfwasd.github.io/napcat-java-client-agent/
+在线文档站：https://cfwasd.github.io/napcat-java-agent/
 
 完整文档见 [docs/](docs/) 目录：
 
@@ -137,7 +137,7 @@ napcat-java/
 
 - [NapCatQQ 官方文档](https://napneko.github.io/guide/start-install)
 - [NapCat API 文档 (Apifox)](https://napcat.apifox.cn/llms.txt)
-- [本项目 GitHub](https://github.com/cfwasd/napcat-java-client-agent)
+- [本项目 GitHub](https://github.com/cfwasd/napcat-java-agent)
 
 ## License
 

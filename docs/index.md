@@ -14,7 +14,7 @@ hero:
       link: /01-quick-start
     - theme: alt
       text: GitHub
-      link: https://github.com/cfwasd/napcat-java-client-agent
+      link: https://github.com/cfwasd/napcat-java-agent
 
 features:
   - icon: 🚀

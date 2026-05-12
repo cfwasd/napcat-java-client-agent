@@ -17,8 +17,8 @@
 ### 1. 克隆并安装到本地
 
 ```bash
-git clone https://github.com/cfwasd/napcat-java-client-agent.git
-cd napcat-java-client-agent
+git clone https://github.com/cfwasd/napcat-java-agent.git
+cd napcat-java-agent
 mvn install -DskipTests
 ```
 
