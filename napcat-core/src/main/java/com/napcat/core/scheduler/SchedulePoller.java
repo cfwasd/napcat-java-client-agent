@@ -135,10 +135,10 @@ public class SchedulePoller {
             log.error("Schedule fire error: id={}", entry.getId(), e);
         }
 
-        // 一次性任务执行后自动删除
-        if (entry.isOneShot()) {
-            store.delete(entry.getId());
-            log.info("One-shot schedule removed: {}", entry.getId());
+        // 非循环任务执行后自动禁用
+        if (!entry.isRecurring()) {
+            store.toggle(entry.getId(), false);
+            log.info("One-shot schedule disabled: {}", entry.getId());
             return;
         }
 

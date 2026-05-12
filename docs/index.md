@@ -25,7 +25,7 @@ features:
     details: 注解式（@OnGroupMessage、@Command）与接口式（EventHandler、CommandHandler）并存，灵活适应不同编码风格。
   - icon: 🤖
     title: AI Agent
-    details: 内置 ReAct 轻量循环，支持 Function Calling / Tool Use，多 LLM 后端无缝切换，含多模态图片理解。
+    details: 内置 ReAct 轻量循环，支持 Function Calling / Tool Use，多 LLM 后端无缝切换，含多模态图片理解、持久化长期记忆与定时任务调度。
   - icon: 🌐
     title: 全协议通信
     details: 支持 HTTP Server / Client、WebSocket Server / Client 四种 NapCat 通信方式，可混合使用。

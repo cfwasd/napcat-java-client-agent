@@ -109,7 +109,10 @@ public class HelloBot {
 - **Spring Boot 开箱即用**：`napcat-spring-boot-starter` 自动配置，高度可配置化
 - **组合注解**：支持自定义元注解，如 `@OnGroupAt`、`@AdminCommand`
 - **关键词唤醒**：消息包含配置唤醒词时自动触发，无需 @
-- **会话上下文**：按用户 ID + 群号隔离的会话管理，支持过期清理与手动重置
+- **持久化长期记忆**：SQLite 存储用户关键信息，跨会话自动检索注入上下文，支持每日 LLM 自动归纳
+- **定时任务调度**：Agent 可通过工具创建 Cron 定时任务，支持 AI 生成内容或固定文本推送，持久化到 SQLite
+- **LLM 备用模型**：主模型失败时自动切换到备用模型，支持 openai / anthropic / ollama / custom
+- **会话上下文**：按用户 ID + 群号隔离的会话管理，支持过期自动清理与手动重置
 
 ---
 

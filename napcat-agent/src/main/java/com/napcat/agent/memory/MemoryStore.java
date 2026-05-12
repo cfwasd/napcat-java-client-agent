@@ -34,6 +34,10 @@ public interface MemoryStore {
         persist(key, content, "summary");
     }
 
+    void summarize(SessionKey key, String summaryDate, String content);
+
+    List<SessionKey> listAllKeys();
+
     /**
      * 清除指定用户的所有记忆。
      */

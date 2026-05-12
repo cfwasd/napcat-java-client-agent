@@ -139,6 +139,16 @@ napcat:
       base-url: https://api.openai.com/v1
       api-key: ${OPENAI_API_KEY}
       model: gpt-4o-mini
+    fallback:
+      enabled: false
+      provider: openai
+      model: gpt-4o-mini
+  memory:
+    enabled: false
+    max-results: 5
+    extract-threshold: 20
+  scheduler:
+    enabled: true
 ```
 
 ```java

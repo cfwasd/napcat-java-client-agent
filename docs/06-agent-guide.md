@@ -18,6 +18,11 @@
 
 默认最大思考轮数为 5 轮，超过则返回提示信息。
 
+新增特性：
+- **持久化长期记忆**：跨会话自动记住用户的关键信息，新会话自动注入上下文
+- **定时任务工具**：Agent 可为用户创建 Cron 定时任务，自动推送消息或 AI 生成内容
+- **LLM 备用模型**：主模型失败时自动切换到备用模型，保证可用性
+
 ---
 
 ## 二、启用 Agent
@@ -241,6 +246,10 @@ public class AgentConfig {
     @Builder.Default
     private boolean showToolProcess = false;  // 是否回传工具执行过程
     private Runnable ackCallback;             // 消息确认回调（如回复表情）
+    @Builder.Default
+    private boolean memoryEnabled = true;     // 是否在本次对话中启用记忆（全局 enabled 时）
+    @Builder.Default
+    private int memoryMaxResults = 5;         // 本次对话检索记忆的最大条数
 }
 ```
 
@@ -281,7 +290,7 @@ String prompt = event.getMessage().toAgentPrompt();
 
 - 按 `SessionKey(userId, groupId)` 隔离会话。私聊时 `groupId = 0`
 - 同一用户在不同群聊、或私聊与群聊之间的会话完全隔离
-- 默认 TTL 为 3600 秒，过期自动清理
+- 默认 TTL 为 3600 秒，每 30 分钟自动清理过期会话
 - 默认最大历史消息 50 条，超出时自动截断（保留 system + 最近 N 条）
 
 ### 6.2 手动管理会话
@@ -418,8 +427,12 @@ napcat:
 | 工具名 | 功能 | 说明 |
 |--------|------|------|
 | `web_search` | 联网搜索 | 基于 DuckDuckGo，免费 |
-| `fetch_url` | 抓取网页 | HTTP 获取指定 URL 的文本内容 |
+| `fetch_url` | 抓取网页 | HTTP 获取指定 URL 的文本内容（仅限公开 HTTP/HTTPS，禁止内网地址） |
 | `get_current_time` | 日期时间 | 获取当前时间、计算日期间隔等 |
+| `create_schedule` | 创建定时任务 | 创建 Cron 定时任务，支持 AI 生成或固定文本推送 |
+| `delete_schedule` | 删除定时任务 | 按 ID 或名称删除任务 |
+| `list_schedules` | 列出任务 | 查看所有已创建的定时任务 |
+| `toggle_schedule` | 启停任务 | 启用或禁用指定任务 |
 
 ---
 
@@ -427,9 +440,86 @@ napcat:
 
 Agent 内部对常见错误做了处理：
 
-- **API 请求错误（4xx）**：不返回消息给用户，避免刷屏
+- **API 请求错误（4xx）**：返回 "请求参数有误，请检查输入内容或稍后重试。" 并记录日志
+- **图片加载失败**：返回友好提示，建议用户描述图片内容
+- **请求超时**：返回 "哎呀，网络有点卡，服务器响应超时了..." 并记录日志
+- **连接失败**：返回 "网络连接失败了，可能是服务器暂时不可用..." 并记录日志
 - **其他异常**：返回 "处理出错了，请稍后再试。" 并记录日志
 - **超过最大轮数**：返回 "思考次数过多，请简化问题。"
+
+---
+
+## 十、持久化长期记忆
+
+框架支持将对话中的关键信息持久化到 SQLite，跨会话保持上下文连续性。
+
+### 10.1 工作原理
+
+1. **记忆提取**：对话结束后，`MemoryExtractor` 异步调用 LLM，从会话历史中提取结构化记忆（fact / preference / topic）
+2. **记忆存储**：提取结果存入 `memories` 表，按 `user_id + group_id` 隔离
+3. **记忆检索**：新会话启动时，`NapCatAgent` 自动从 `MemoryStore` 检索相关记忆，追加到 system prompt
+4. **每日归纳**：凌晨 1 点定时任务触发 `DailyMemorySummarizer`，将当天所有碎片化记忆归纳为一段摘要，存入 `memory_summaries` 表（优先检索）
+
+### 10.2 启用配置
+
+```yaml
+napcat:
+  memory:
+    enabled: true
+    max-results: 5          # 每次对话检索记忆条数
+    extract-threshold: 20   # 累积多少条消息后触发提取
+```
+
+### 10.3 手动清除记忆
+
+```java
+@Autowired
+private MemoryStore memoryStore;
+
+// 清除某用户在当前群的所有记忆
+memoryStore.clear(new SessionKey(userId, groupId));
+```
+
+**注意**：`/new` 或 `/clear` 命令仅重置**会话上下文**，**不会**清除持久化记忆。
+
+---
+
+## 十一、定时任务工具
+
+Agent 可通过内置工具为用户创建、管理定时任务，任务持久化到 SQLite，重启后自动恢复。
+
+### 11.1 任务类型
+
+- **ai_generate**：到时间点调用 Agent 生成动态内容后发送
+- **send_message**：到时间点发送固定文本
+
+### 11.2 Cron 表达式格式
+
+使用 6 位 Spring Cron 格式：`秒 分 时 日 月 周`
+
+| 示例 | 含义 |
+|------|------|
+| `0 0 8 * * ?` | 每天早上 8:00 |
+| `0 30 14 * * ?` | 每天下午 14:30 |
+| `0 0 9 * * 1-5` | 工作日 9:00 |
+
+### 11.3 示例
+
+用户说："每天早上 8 点提醒我喝水"
+
+Agent 会调用：
+```json
+{
+  "name": "喝水提醒",
+  "cron": "0 0 8 * * ?",
+  "action": "ai_generate",
+  "prompt": "提醒用户喝水休息"
+}
+```
+
+任务目标默认取当前对话场景（群聊 → 群号，私聊 → 用户 QQ）。
+
+---
 
 开启 DEBUG 日志查看 Agent 思考过程：
 

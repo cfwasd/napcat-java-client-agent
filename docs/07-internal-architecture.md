@@ -17,8 +17,10 @@
 ### napcat-agent
 
 - **Agent 引擎**：`NapCatAgent` 驱动 ReAct 循环，支持多模态图片提取与 `reasoning_content`
-- **会话管理**：`SessionManager` 按 `SessionKey(userId, groupId)` 隔离上下文
+- **会话管理**：`SessionManager` 按 `SessionKey(userId, groupId)` 隔离上下文，支持过期自动清理
 - **Tool 注册**：`ToolRegistry` 扫描 `@Tool` 注解，生成 LLM JSON Schema，含 JSON 容错修复与模糊匹配
+- **持久化记忆**：`MemoryStore` / `MemoryExtractor` / `DailyMemorySummarizer` 实现跨会话记忆提取、存储与每日归纳
+- **定时任务**：`ScheduleTool` / `TaskExecutor` / `SchedulePoller` / `TimerWheel` 支持 Agent 创建和管理 Cron 定时任务
 - **抽象接口**：`LlmProvider`、`Session`、`ToolSchema`、`ChatMessage` 等
 
 ### napcat-llm-providers
@@ -59,7 +61,9 @@ Spring ApplicationContext 初始化
   │     ├─ 如 agent.enabled=true：
   │     │     ├─ 扫描所有 Bean 的 @Tool 方法 → ToolRegistry
   │     │     ├─ 创建 SessionManager
-  │     │     └─ 创建 NapCatAgent
+  │     │     ├─ 创建 NapCatAgent
+      │     │     ├─ 如 memory.enabled=true：创建 SqliteMemoryStore + MemoryExtractor
+      │     │     ├─ 如 scheduler.enabled=true：创建 ScheduleStore + TimerWheel + SchedulePoller + TaskExecutor + ScheduleTool
   │     └─ 注册 NapCatBeanPostProcessor + NapCatLifecycle
   │
   ├─ NapCatBeanPostProcessor
@@ -69,6 +73,8 @@ Spring ApplicationContext 初始化
   │
   └─ NapCatLifecycle.start()
         ├─ 绑定 MessageRouter → EventDispatcher 管道
+        ├─ 如 scheduler.enabled=true：启动 SchedulePoller，注册 ScheduleTool，注册每日记忆归纳任务
+        ├─ 启动会话过期清理线程（每 30 分钟）
         ├─ 如 at-me-trigger=true：注册兜底 Agent Handler
         └─ 启动所有 BotAdapter
 ```
@@ -239,15 +245,43 @@ ToolRegistry
   ├─ tools: Map<String, ToolMethod>
   ├─ register(Object): void
   ├─ getSchemas(): List<ToolSchema>
-  └─ invoke(String, String): Object  // 含 JSON 容错修复
+  └─ invoke(String, String, SessionKey): Object  // 含 JSON 容错修复
 
 SessionManager
   ├─ sessions: Map<SessionKey, Session>
   ├─ ttlSeconds: long
   ├─ maxHistoryMessages: int
   ├─ get(SessionKey): Session
-  ├─ clear(SessionKey): void
+  ├─ getAndRemove(SessionKey): Session
   └─ clearExpired(): void
+
+MemoryStore (interface)
+  ├─ retrieve(SessionKey, String, int): List<String>
+  ├─ persist(SessionKey, String, String): void
+  ├─ summarize(SessionKey, String, String): void
+  └─ clear(SessionKey): void
+
+MemoryExtractor
+  ├─ extractIfNeeded(SessionKey, Session): void  // 异步提取
+  └─ extractAndPersistSync(SessionKey, Session): void  // 同步提取（/new 前）
+
+DailyMemorySummarizer
+  └─ runDailySummary(): void  // 凌晨 1 点触发，并行归纳所有用户记忆
+
+ScheduleStore
+  ├─ insert(ScheduleEntry): String
+  ├─ listEnabled(): List<ScheduleEntry>
+  └─ toggle(String, boolean): boolean
+
+SchedulePoller
+  ├─ start(): void
+  ├─ stop(): void
+  ├─ scheduleNow(ScheduleEntry): void
+  └─ rescheduleAll(): void
+
+TimerWheel
+  ├─ schedule(String, Instant, Runnable): void
+  └─ cancel(String): void
 
 Session
   ├─ key: SessionKey
@@ -343,6 +377,16 @@ napcat:
 ### 5.3 Agent 线程
 
 Agent 的每轮思考在 `CompletableFuture` 异步链中执行，不阻塞事件处理线程。
+
+### 5.4 定时任务线程
+
+- `napcat-poller`：守护线程，每 5 分钟扫描 SQLite 中的启用任务，将未来窗口内的任务注册到 `TimerWheel`
+- `napcat-timer`：固定 2 线程的守护线程池，执行 `TimerWheel` 中到期的任务回调
+- `napcat-daily-summary`：固定 4 线程的守护线程池，`DailyMemorySummarizer` 并行处理各用户的记忆归纳
+
+### 5.5 API 清理线程
+
+- `napcat-api-cleaner`：守护线程，每 10 秒清理 `NapCatApi` 中超时的 pending 请求
 
 ---
 

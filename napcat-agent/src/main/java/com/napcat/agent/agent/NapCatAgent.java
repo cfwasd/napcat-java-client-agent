@@ -126,18 +126,19 @@ public class NapCatAgent {
             }
         }
 
-        ChatMessage userMsg = new ChatMessage("user", input, null);
+        String safeInput = (input != null) ? input : "";
+        ChatMessage userMsg = new ChatMessage("user", safeInput, null);
         if (enableVision) {
-            java.util.List<String> imageUrls = extractImageUrls(input);
+            java.util.List<String> imageUrls = extractImageUrls(safeInput);
             if (!imageUrls.isEmpty()) {
                 userMsg.setImageUrls(imageUrls);
                 // 文本中保留 [图片] 占位，避免 URL 重复干扰模型
-                userMsg.setContent(input.replaceAll("\\[图片:[^\\]]+\\]", "[图片]"));
+                userMsg.setContent(safeInput.replaceAll("\\[图片:[^\\]]+\\]", "[图片]"));
             }
         } else {
             // 如果禁用图片功能，移除图片标记
-            if (input.contains("[图片:")) {
-                userMsg.setContent(input.replaceAll("\\[图片:[^\\]]+\\]", "[图片]"));
+            if (safeInput.contains("[图片:")) {
+                userMsg.setContent(safeInput.replaceAll("\\[图片:[^\\]]+\\]", "[图片]"));
                 log.debug("[Agent] Vision disabled, ignored image URLs in message");
             }
         }
@@ -195,11 +196,21 @@ public class NapCatAgent {
 
         List<ToolSchema> tools = toolRegistry.getSchemas();
         if (!tools.isEmpty()) {
-            sb.append("\n工具：\n");
+            sb.append("\n\n可用工具：\n");
             for (ToolSchema tool : tools) {
-                sb.append("- **").append(tool.getName()).append("**：").append(tool.getDescription()).append("\n");
+                sb.append("\n- **").append(tool.getName()).append("**：").append(tool.getDescription()).append("\n");
+                if (tool.getParameters() != null && !tool.getParameters().isEmpty()) {
+                    sb.append("  参数：\n");
+                    for (var entry : tool.getParameters().entrySet()) {
+                        boolean required = tool.getRequired() != null && tool.getRequired().contains(entry.getKey());
+                        sb.append("    - ").append(entry.getKey())
+                          .append(" (").append(entry.getValue().getType()).append(")")
+                          .append(required ? " [必填]" : " [可选]")
+                          .append("：").append(entry.getValue().getDescription()).append("\n");
+                    }
+                }
             }
-            sb.append("非必要不调用工具。\n");
+            sb.append("\n仅在用户明确要求时才调用工具，非必要不调用。\n");
         }
 
         return sb.toString().trim().isEmpty() ? null : sb.toString().trim();
@@ -265,7 +276,9 @@ public class NapCatAgent {
                     if (errorMsg != null) {
                         if (errorMsg.contains("API请求错误: 4")) {
                             log.warn("[Agent] API client error in round {}: {}", round, ex.getMessage());
-                            return null;
+                            String clientErrMsg = "请求参数有误，请检查输入内容或稍后重试。";
+                            session.addMessage(new ChatMessage("assistant", clientErrMsg, null));
+                            return clientErrMsg;
                         }
                         
                         if (errorMsg.contains("图片加载失败") || errorMsg.contains("IMAGE data") 

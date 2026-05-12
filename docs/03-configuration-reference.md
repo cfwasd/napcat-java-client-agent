@@ -86,6 +86,16 @@ napcat:
       max-tokens: 2000
       timeout: 60000
 
+    fallback:                           # 备用模型（主模型失败时自动切换）
+      enabled: false
+      provider: openai                  # openai / anthropic / ollama / custom
+      base-url: ""
+      api-key: ""
+      model: ""
+      max-tokens: 2000
+      temperature: 0.7
+      timeout: 60000
+
   # ========== Agent 配置 ==========
   agent:
     enabled: false
@@ -95,13 +105,26 @@ napcat:
     session-ttl: 3600                   # 会话过期时间，秒
     show-tool-process: false            # 是否将工具调用过程发送到聊天
     max-history-messages: 50            # 会话历史最大消息条数，超出时自动截断
+    enable-vision: true                 # 是否启用图片识别（如果 LLM 服务器无法访问 QQ 图片链接，建议关闭）
     builtin:
       web-search:
-        enabled: true                   # 联网搜索 (DuckDuckGo)
+        enabled: true                   # 联网搜索 (SearxNG)
       fetch-url:
         enabled: true                   # HTTP 抓取网页内容
       date-time:
         enabled: true                   # 日期时间查询
+
+  # ========== 持久化记忆 ==========
+  memory:
+    enabled: false                      # 是否启用长期记忆
+    max-results: 5                      # 每次对话检索记忆条数
+    extract-threshold: 20               # 累积多少条消息后触发 LLM 提取
+
+  # ========== 定时任务调度 ==========
+  scheduler:
+    enabled: true                       # 是否启用定时任务调度
+    poll-interval-ms: 300000            # 轮询间隔（毫秒），默认 5 分钟
+    poll-window-ms: 300000              # 提前注册窗口（毫秒），默认 5 分钟
 
   # ========== 高级配置 ==========
   core:
@@ -111,6 +134,7 @@ napcat:
       queue-capacity: 1000
     message-post-format: array          # array / string，OneBot11 上报格式
     sync-event-processing: false        # 是否同步处理事件
+    database-path: napcat_data/napcat.db  # SQLite 数据库文件路径
 ```
 
 ---
@@ -251,6 +275,48 @@ napcat:
 | `event-executor.queue-capacity` | int | `1000` | 任务队列容量 |
 | `message-post-format` | String | `"array"` | OneBot11 消息上报格式：`array` 或 `string` |
 | `sync-event-processing` | boolean | `false` | 是否同步处理事件 |
+| `database-path` | String | `"napcat_data/napcat.db"` | SQLite 数据库文件路径（定时任务、持久化记忆共用） |
+
+---
+
+### napcat.memory
+
+| 配置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| `enabled` | boolean | `false` | 是否启用长期记忆功能 |
+| `max-results` | int | `5` | 每次对话时从记忆库检索的最大条数 |
+| `extract-threshold` | int | `20` | 会话中累积多少条非 system 消息后，触发 LLM 异步提取记忆 |
+
+启用后，Agent 会在对话中自动提取用户的关键事实、偏好和重要话题，存入 SQLite。新会话启动时会自动检索相关记忆并注入 system prompt。
+
+---
+
+### napcat.scheduler
+
+| 配置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| `enabled` | boolean | `true` | 是否启用定时任务调度 |
+| `poll-interval-ms` | long | `300000` | 轮询间隔（毫秒），默认 5 分钟 |
+| `poll-window-ms` | long | `300000` | 提前注册窗口（毫秒），默认 5 分钟 |
+
+Agent 可通过 `create_schedule` 工具创建 Cron 定时任务，任务持久化到 SQLite，重启后自动恢复。
+
+---
+
+### napcat.llm.fallback
+
+| 配置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| `enabled` | boolean | `false` | 是否启用备用模型 |
+| `provider` | String | `openai` | 备用模型类型：`openai` / `anthropic` / `ollama` / `custom` |
+| `base-url` | String | - | 备用模型 API 地址 |
+| `api-key` | String | `""` | 备用模型 API Key |
+| `model` | String | - | 备用模型名称 |
+| `max-tokens` | int | `2000` | 最大 Token 数 |
+| `temperature` | double | `0.7` | 采样温度 |
+| `timeout` | long | `60000` | 请求超时（毫秒） |
+
+主模型调用失败时，自动切换到备用模型重试一次。
 
 ---
 

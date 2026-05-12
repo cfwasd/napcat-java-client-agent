@@ -33,7 +33,7 @@ public class DateTimeTool {
         description = "获取当前日期和时间。可指定时区。"
     )
     public String getCurrentTime(
-        @ToolParam(description = "IANA 时区 ID，如 Asia/Shanghai、America/New_York。不传则使用系统时区。", required = false)
+        @ToolParam(value = "timezone", description = "IANA 时区 ID，如 Asia/Shanghai、America/New_York。不传则使用系统时区。", required = false)
         String timezone
     ) {
         ZonedDateTime now;
@@ -60,8 +60,8 @@ public class DateTimeTool {
         description = "计算两个日期之间相差多少天。"
     )
     public String daysBetween(
-        @ToolParam(description = "起始日期，格式 yyyy-MM-dd", required = true) String from,
-        @ToolParam(description = "结束日期，格式 yyyy-MM-dd", required = true) String to
+        @ToolParam(value = "from", description = "起始日期，格式 yyyy-MM-dd", required = true) String from,
+        @ToolParam(value = "to", description = "结束日期，格式 yyyy-MM-dd", required = true) String to
     ) {
         try {
             LocalDate fromDate = LocalDate.parse(from, FMT_DATE);
@@ -82,7 +82,7 @@ public class DateTimeTool {
         description = "查询某个日期是星期几。"
     )
     public String getDayOfWeek(
-        @ToolParam(description = "日期，格式 yyyy-MM-dd。不传则使用今天。", required = false) String date
+        @ToolParam(value = "date", description = "日期，格式 yyyy-MM-dd。不传则使用今天。", required = false) String date
     ) {
         try {
             LocalDate d = (date != null && !date.isBlank())

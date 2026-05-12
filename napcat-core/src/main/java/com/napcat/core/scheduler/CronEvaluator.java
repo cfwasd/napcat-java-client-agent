@@ -66,4 +66,20 @@ public class CronEvaluator {
             return false;
         }
     }
+
+    /**
+     * 判断 cron 表达式是否为循环任务（在未来至少能触发两次）。
+     */
+    public static boolean isRecurring(String cron) {
+        try {
+            CronExpression expr = CronExpression.parse(cron);
+            LocalDateTime now = LocalDateTime.now();
+            LocalDateTime next1 = expr.next(now);
+            if (next1 == null) return false;
+            LocalDateTime next2 = expr.next(next1);
+            return next2 != null;
+        } catch (Exception e) {
+            return false;
+        }
+    }
 }

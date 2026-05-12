@@ -116,7 +116,10 @@ public class NapCatProperties {
     public static class AgentProperties {
         private boolean enabled = false;
         private int maxReactRounds = 5;
-        private String systemPrompt = "你是一个友好的QQ机器人。优先直接回答，仅用户明确要求搜索/查时间/访问链接时才用工具。";
+        private String systemPrompt = "你是一个友好的QQ机器人。\n" +
+                "优先直接回答用户问题，只有当用户明确要求时才能调用工具。\n" +
+                "Cron 表达式为 6 位格式「秒 分 时 日 月 周」，例：0 0 8 * * ? = 每天8点、0 30 14 * * ? = 每天14:30。\n" +
+                "创建定时任务时务必：1) 提供标准 cron 表达式 2) 选择 action=ai_generate(需 prompt)或 send_message(需 replyText)。";
         private long timeoutPerRound = 30000;
         private long sessionTtl = 3600;
         /** 是否将工具调用过程发送到聊天 */

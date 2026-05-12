@@ -1,16 +1,19 @@
 package com.napcat.agent.scheduler;
 
 import com.napcat.agent.agent.NapCatAgent;
+import com.napcat.agent.memory.DailyMemorySummarizer;
 import com.napcat.core.api.NapCatApi;
 import com.napcat.core.message.MessageChain;
 import com.napcat.core.scheduler.ScheduleStore.ScheduleEntry;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 
 /**
  * 定时任务执行器。
  * 从 SchedulePoller 的回调中触发，根据 schedule 的 action 字段选择执行路径：
  * - send_message：直接用 NapCatApi 发送固定文本（0 token）
  * - ai_generate：调用 NapCatAgent 生成动态内容后发送
+ * - custom：系统级自定义任务（如每日记忆归纳）
  * 
  * 群聊场景下会自动 @ 任务创建者。
  */
@@ -19,8 +22,11 @@ public class TaskExecutor {
 
     private final NapCatApi api;
     private final NapCatAgent agent;
+    private final ObjectProvider<DailyMemorySummarizer> summarizerProvider;
 
-    public TaskExecutor(NapCatApi api, NapCatAgent agent) {
+    public TaskExecutor(NapCatApi api, NapCatAgent agent,
+                        ObjectProvider<DailyMemorySummarizer> summarizerProvider) {
+        this.summarizerProvider = summarizerProvider;
         this.api = api;
         this.agent = agent;
     }
@@ -40,6 +46,7 @@ public class TaskExecutor {
             switch (action) {
                 case "send_message" -> executeSendMessage(entry);
                 case "ai_generate" -> executeAiGenerate(entry);
+                case "custom" -> executeCustom(entry);
                 default -> log.warn("Unknown schedule action '{}' for {}", action, entry.getId());
             }
         } catch (Exception e) {
@@ -159,5 +166,16 @@ public class TaskExecutor {
                     log.error("AI generate failed for schedule {}", entry.getId(), ex);
                     return null;
                 });
+    }
+
+    private void executeCustom(ScheduleEntry entry) {
+        if ("每日记忆归纳".equals(entry.getName())) {
+            DailyMemorySummarizer summarizer = summarizerProvider.getIfAvailable();
+            if (summarizer != null) {
+                summarizer.runDailySummary();
+            } else {
+                log.warn("DailyMemorySummarizer not available, skipping daily summary");
+            }
+        }
     }
 }

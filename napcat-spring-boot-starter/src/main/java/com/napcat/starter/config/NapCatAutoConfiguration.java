@@ -321,10 +321,20 @@ public class NapCatAutoConfiguration {
         MigrationManager mm = new MigrationManager(dbManager);
         // 注册 schedules + memories 表
         mm.register(1, "create schedules table", ScheduleStore.ddl());
-        mm.register(2, "create memories table", SqliteMemoryStore.ddl());
+        mm.register(2, "create memories table", SqliteMemoryStore.memoriesDdl());
         // 为已有任务设置默认 created_by（如果为空）
         mm.register(3, "set default created_by for existing schedules", 
                 "UPDATE schedules SET created_by = 0 WHERE created_by IS NULL");
+        // 为 schedules 表添加 is_recurring 字段
+        mm.register(4, "add is_recurring column to schedules",
+                "ALTER TABLE schedules ADD COLUMN is_recurring INTEGER DEFAULT 1");
+        // 创建 memory_summaries 表（每日归纳）
+        mm.register(5, "create memory_summaries table", SqliteMemoryStore.summariesDdl());
+        // 添加索引优化查询
+        mm.register(6, "create memory indexes",
+                "CREATE INDEX IF NOT EXISTS idx_memories_user_group ON memories(user_id, group_id);" +
+                "CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at);" +
+                "CREATE INDEX IF NOT EXISTS idx_summaries_user_group_date ON memory_summaries(user_id, group_id, summary_date);");
         mm.migrate();
         return mm;
     }
@@ -345,8 +355,9 @@ public class NapCatAutoConfiguration {
     @Bean(name = "napcatTaskExecutor")
     @ConditionalOnMissingBean(name = "napcatTaskExecutor")
     @ConditionalOnProperty(prefix = "napcat.scheduler", name = "enabled", havingValue = "true", matchIfMissing = true)
-    public TaskExecutor taskExecutor(NapCatApi api, ObjectProvider<NapCatAgent> agentProvider) {
-        return new TaskExecutor(api, agentProvider.getIfAvailable());
+    public TaskExecutor taskExecutor(NapCatApi api, ObjectProvider<NapCatAgent> agentProvider,
+                                      ObjectProvider<DailyMemorySummarizer> summarizerProvider) {
+        return new TaskExecutor(api, agentProvider.getIfAvailable(), summarizerProvider);
     }
 
     @Bean

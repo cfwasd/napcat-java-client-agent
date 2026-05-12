@@ -2,6 +2,8 @@ package com.napcat.admin.bot;
 
 import com.napcat.agent.agent.AgentConfig;
 import com.napcat.agent.agent.NapCatAgent;
+import com.napcat.agent.memory.MemoryExtractor;
+import com.napcat.agent.session.Session;
 import com.napcat.agent.session.SessionKey;
 import com.napcat.agent.session.SessionManager;
 import com.napcat.core.annotation.MentionFilter;
@@ -30,6 +32,9 @@ public class AgentDemoBot {
 
     @Autowired(required = false)
     private SessionManager sessionManager;
+
+    @Autowired(required = false)
+    private MemoryExtractor memoryExtractor;
 
     @Autowired
     private BotProperties botProperties;
@@ -85,13 +90,21 @@ public class AgentDemoBot {
     }
 
     /**
-     * 检测是否为会话清空命令（/new 或 /clear），如果是则执行清空并返回 true。
+     * 检测是否为会话清空命令（/new 或 /clear），如果是则提取记忆后清空并返回 true。
      */
     private boolean tryClearSession(GroupMessageEvent event, String text) {
         if (sessionManager == null) return false;
         String trimmed = text.trim();
         if ("/new".equals(trimmed) || "/clear".equals(trimmed)) {
-            sessionManager.clear(new SessionKey(event.getUserId(), event.getGroupId()));
+            SessionKey key = new SessionKey(event.getUserId(), event.getGroupId());
+            // 清除前提取记忆
+            if (memoryExtractor != null) {
+                Session session = sessionManager.get(key);
+                if (session != null && !session.getHistory().isEmpty()) {
+                    memoryExtractor.extractAndPersistSync(key, session);
+                }
+            }
+            sessionManager.getAndRemove(key);
             event.reply("会话已重置");
             return true;
         }

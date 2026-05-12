@@ -53,7 +53,7 @@ public class WebSearchTool {
             description = "搜索互联网获取最新信息。当需要实时数据、新闻或 LLM 训练截止后的信息时使用。"
     )
     public String search(
-            @ToolParam(description = "搜索关键词或问题", required = true) String query
+            @ToolParam(value = "query", description = "搜索关键词或问题", required = true) String query
     ) {
         try {
             String encoded = URLEncoder.encode(query, StandardCharsets.UTF_8);

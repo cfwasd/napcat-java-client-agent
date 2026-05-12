@@ -1,6 +1,7 @@
 package com.napcat.starter.config;
 
 import com.napcat.agent.agent.NapCatAgent;
+import com.napcat.agent.memory.DailyMemorySummarizer;
 import com.napcat.agent.scheduler.ScheduleTool;
 import com.napcat.agent.tool.ToolRegistry;
 import com.napcat.core.adapter.BotAdapter;
@@ -15,12 +16,16 @@ import com.napcat.core.handler.EventDispatcher;
 import com.napcat.core.handler.HandlerRegistry;
 import com.napcat.core.message.MessageChain;
 import com.napcat.core.scheduler.SchedulePoller;
+import com.napcat.core.scheduler.ScheduleStore;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.SmartLifecycle;
 
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Spring 生命周期管理：在所有 Bean 初始化完成后启动适配器，
@@ -38,6 +43,7 @@ public class NapCatLifecycle implements SmartLifecycle {
     private final ObjectProvider<NapCatAgent> agentProvider;
     private final ApplicationContext ctx;
     private volatile boolean running = false;
+    private ScheduledExecutorService sessionCleanupExecutor;
 
     public NapCatLifecycle(List<BotAdapter> adapters, EventDispatcher dispatcher,
                            NapCatApi api, HandlerRegistry registry,
@@ -74,6 +80,41 @@ public class NapCatLifecycle implements SmartLifecycle {
             if (scheduleTool != null && toolRegistry != null) {
                 toolRegistry.register(scheduleTool);
                 log.info("ScheduleTool registered with ToolRegistry");
+            }
+
+            // 注册每日记忆归纳定时任务（凌晨 1 点）
+            DailyMemorySummarizer summarizer = ctx.getBeanProvider(DailyMemorySummarizer.class).getIfAvailable();
+            ScheduleStore scheduleStore = ctx.getBeanProvider(ScheduleStore.class).getIfAvailable();
+            if (summarizer != null && scheduleStore != null) {
+                ScheduleStore.ScheduleEntry dailyTask = new ScheduleStore.ScheduleEntry();
+                dailyTask.setName("每日记忆归纳");
+                dailyTask.setCron("0 0 1 * * ?");
+                dailyTask.setAction("custom");
+                dailyTask.setTargetType("system");
+                dailyTask.setTargetId(0);
+                dailyTask.setEnabled(true);
+                dailyTask.setRecurring(true);
+                String taskId = scheduleStore.insertOrIgnoreByName(dailyTask);
+                if (taskId != null && poller != null) {
+                    dailyTask.setId(taskId);
+                    poller.scheduleNow(dailyTask);
+                }
+                log.info("Daily memory summary schedule registered");
+            }
+
+            // 启动会话过期清理（每 30 分钟）
+            com.napcat.agent.session.SessionManager sessionManager =
+                    ctx.getBeanProvider(com.napcat.agent.session.SessionManager.class).getIfAvailable();
+            if (sessionManager != null) {
+                sessionCleanupExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+                    Thread t = new Thread(r, "napcat-session-cleanup");
+                    t.setDaemon(true);
+                    return t;
+                });
+                sessionCleanupExecutor.scheduleWithFixedDelay(
+                        sessionManager::clearExpired,
+                        30, 30, TimeUnit.MINUTES);
+                log.info("Session cleanup scheduler started");
             }
         } catch (Exception e) {
             log.warn("Failed to start scheduler: {}", e.getMessage());
@@ -135,6 +176,24 @@ public class NapCatLifecycle implements SmartLifecycle {
             }
         } catch (Exception e) {
             log.warn("Failed to stop scheduler: {}", e.getMessage());
+        }
+
+        try {
+            api.shutdown();
+        } catch (Exception e) {
+            log.warn("Failed to shutdown NapCatApi: {}", e.getMessage());
+        }
+
+        if (sessionCleanupExecutor != null && !sessionCleanupExecutor.isShutdown()) {
+            sessionCleanupExecutor.shutdown();
+            try {
+                if (!sessionCleanupExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    sessionCleanupExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                sessionCleanupExecutor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
         }
 
         for (BotAdapter adapter : adapters) {

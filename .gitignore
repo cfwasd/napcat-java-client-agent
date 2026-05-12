@@ -43,3 +43,10 @@ pnpm-lock.yaml
 # VitePress build output
 docs/.vitepress/dist
 docs/.vitepress/cache
+
+# SQLite database
+napcat_data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm

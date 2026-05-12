@@ -35,7 +35,8 @@ public class ScheduleStore {
                 "reply_text TEXT," +
                 "prompt TEXT," +
                 "enabled INTEGER DEFAULT 1," +
-                "created_by INTEGER," +
+                "is_recurring INTEGER DEFAULT 1," +
+                "created_by INTEGER DEFAULT 0," +
                 "created_at TEXT DEFAULT (datetime('now'))," +
                 "updated_at TEXT DEFAULT (datetime('now'))" +
                 ")";
@@ -47,8 +48,8 @@ public class ScheduleStore {
      */
     public String insert(ScheduleEntry entry) {
         String id = UUID.randomUUID().toString().replace("-", "").substring(0, 12);
-        String sql = "INSERT INTO schedules (id, name, cron, action, target_type, target_id, reply_text, prompt, enabled, created_by) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        String sql = "INSERT INTO schedules (id, name, cron, action, target_type, target_id, reply_text, prompt, enabled, is_recurring, created_by) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         try (Connection conn = dbManager.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, id);
@@ -60,7 +61,8 @@ public class ScheduleStore {
             ps.setString(7, entry.getReplyText());
             ps.setString(8, entry.getPrompt());
             ps.setInt(9, entry.isEnabled() ? 1 : 0);
-            ps.setLong(10, entry.getCreatedBy() != null ? entry.getCreatedBy() : 0);
+            ps.setInt(10, entry.isRecurring() ? 1 : 0);
+            ps.setLong(11, entry.getCreatedBy() != null ? entry.getCreatedBy() : 0);
             ps.executeUpdate();
             log.info("Schedule created: id={}, name={}, cron={}", id, entry.getName(), entry.getCron());
             return id;
@@ -164,14 +166,20 @@ public class ScheduleStore {
     }
 
     /**
-     * 删除一次性任务（执行后自动清理）。
+     * 单次任务执行后禁用（而非删除），保留记录供查询。
+     * @return true 如果执行了禁用操作
      */
-    public boolean deleteIfOneShot(String id) {
+    public boolean disableOneShot(String id) {
         ScheduleEntry entry = getById(id);
-        if (entry != null && entry.isOneShot()) {
-            return delete(id);
+        if (entry != null && !entry.isRecurring()) {
+            return toggle(id, false);
         }
         return false;
+    }
+
+    @Deprecated
+    public boolean deleteIfOneShot(String id) {
+        return disableOneShot(id);
     }
 
     /**
@@ -206,6 +214,7 @@ public class ScheduleStore {
         e.setReplyText(rs.getString("reply_text"));
         e.setPrompt(rs.getString("prompt"));
         e.setEnabled(rs.getInt("enabled") == 1);
+        e.setRecurring(rs.getInt("is_recurring") != 0);
         e.setCreatedBy(rs.getLong("created_by"));
         e.setCreatedAt(rs.getString("created_at"));
         e.setUpdatedAt(rs.getString("updated_at"));
@@ -223,13 +232,14 @@ public class ScheduleStore {
         private String replyText;
         private String prompt;
         private boolean enabled = true;
+        private boolean recurring = true;
         private Long createdBy;
         private String createdAt;
         private String updatedAt;
 
-        /** 是否为一次性任务（cron 表达式仅在配置的单一时间点触发一次） */
+        @Deprecated
         public boolean isOneShot() {
-            return cron != null && !cron.contains("*") && !cron.contains("/") && !cron.contains(",");
+            return !recurring;
         }
     }
 }

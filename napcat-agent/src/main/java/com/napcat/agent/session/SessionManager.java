@@ -44,12 +44,23 @@ public class SessionManager {
 
     /**
      * 清除指定会话。
+     * @deprecated 使用 {@link #getAndRemove(SessionKey)} 以在清除前提取记忆
      */
+    @Deprecated
     public void clear(SessionKey key) {
+        sessions.remove(key);
+    }
+
+    /**
+     * 获取会话并移除。返回被移除的 Session，供记忆提取后清除。
+     * @return 被移除的会话，若不存在则返回 null
+     */
+    public Session getAndRemove(SessionKey key) {
         Session removed = sessions.remove(key);
         if (removed != null) {
-            log.debug("Session cleared: {}", key);
+            log.debug("Session removed for extraction: {}", key);
         }
+        return removed;
     }
 
     /**

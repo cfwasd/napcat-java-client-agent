@@ -25,6 +25,7 @@ public class MemoryExtractor {
     private final NapCatAgent agent;
     private final int extractThreshold;  // 累积多少条消息后触发提取
     private static final ObjectMapper mapper = new ObjectMapper();
+    private final java.util.Map<SessionKey, Integer> lastExtractedCounts = new java.util.concurrent.ConcurrentHashMap<>();
 
     public MemoryExtractor(MemoryStore memoryStore, NapCatAgent agent, int extractThreshold) {
         this.memoryStore = memoryStore;
@@ -41,18 +42,50 @@ public class MemoryExtractor {
                 .filter(m -> !"system".equals(m.getRole()))
                 .count();
 
-        if (msgCount >= extractThreshold) {
-            // 异步提取，不阻塞主流程
-            CompletableFuture.runAsync(() -> doExtract(key, session));
+        Integer last = lastExtractedCounts.get(key);
+        int added = (last != null) ? msgCount - last : msgCount;
+
+        if (added >= extractThreshold) {
+            final int currentCount = msgCount;
+            // 异步提取，不阻塞主流程；无论成败都更新计数，避免无限重试
+            CompletableFuture.runAsync(() -> doExtract(key, session))
+                    .whenComplete((v, ex) -> {
+                        if (ex != null) {
+                            log.warn("Memory extraction failed for {}: {}", key, ex.getMessage());
+                        }
+                        lastExtractedCounts.put(key, currentCount);
+                    });
         }
     }
 
-    private void doExtract(SessionKey key, Session session) {
+    /**
+     * 同步提取并持久化记忆（用于 /new 等会话清除前）。
+     * 阻塞等待 LLM 提取完成，最多等待 30 秒。
+     *
+     * @param key     会话键
+     * @param session 待提取的会话
+     */
+    public void extractAndPersistSync(SessionKey key, Session session) {
+        if (session.getHistory().isEmpty()) return;
+        try {
+            doExtract(key, session).get(30, java.util.concurrent.TimeUnit.SECONDS);
+            int msgCount = (int) session.getHistory().stream()
+                    .filter(m -> !"system".equals(m.getRole()))
+                    .count();
+            lastExtractedCounts.put(key, msgCount);
+        } catch (java.util.concurrent.TimeoutException e) {
+            log.warn("Memory extraction on /new timed out for {}", key);
+        } catch (Exception e) {
+            log.warn("Memory extraction on /new failed for {}: {}", key, e.getMessage());
+        }
+    }
+
+    private CompletableFuture<Void> doExtract(SessionKey key, Session session) {
         try {
             String prompt = buildExtractionPrompt(session);
-            if (prompt == null) return;
+            if (prompt == null) return CompletableFuture.completedFuture(null);
 
-            agent.chat(key, prompt,
+            return agent.chat(key, prompt,
                     com.napcat.agent.agent.AgentConfig.builder()
                             .maxRounds(1)
                             .systemPrompt("你是一个信息提取助手。从对话中提取关于用户的关键事实、偏好和重要信息，以JSON数组格式返回。")
@@ -66,6 +99,7 @@ public class MemoryExtractor {
 
         } catch (Exception e) {
             log.error("Memory extraction error for {}", key, e);
+            return CompletableFuture.failedFuture(e);
         }
     }
 

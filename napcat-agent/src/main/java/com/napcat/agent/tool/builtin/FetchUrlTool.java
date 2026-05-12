@@ -41,8 +41,11 @@ public class FetchUrlTool {
         description = "获取指定 URL 的内容。支持网页、图片、文件、视频等任意资源。当用户消息中包含任何链接时必须调用此工具，禁止自行推测链接内容。"
     )
     public String fetch(
-        @ToolParam(description = "URL地址", required = true) String url
+        @ToolParam(value = "url", description = "URL地址", required = true) String url
     ) {
+        if (!isAllowedUrl(url)) {
+            return "获取失败：仅支持访问公开的 HTTP/HTTPS 网址，禁止访问内网或本地地址。";
+        }
         try {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
@@ -108,6 +111,43 @@ public class FetchUrlTool {
         } catch (Exception e) {
             log.error("Fetch URL failed: {}", url, e);
             return "获取 URL 出错：" + e.getMessage();
+        }
+    }
+
+    /**
+     * 校验 URL 是否允许访问（仅限公开 HTTP/HTTPS，禁止内网/本地地址）。
+     */
+    private boolean isAllowedUrl(String urlStr) {
+        try {
+            URI uri = URI.create(urlStr);
+            String scheme = uri.getScheme();
+            if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+                return false;
+            }
+            String host = uri.getHost();
+            if (host == null) return false;
+            String lowerHost = host.toLowerCase();
+            if ("localhost".equals(lowerHost)) return false;
+            boolean isIp = lowerHost.matches("^\\d+\\.\\d+\\.\\d+\\.\\d+$");
+            if (isIp) {
+                if (lowerHost.startsWith("127.") || lowerHost.startsWith("10.")
+                        || lowerHost.startsWith("192.168.") || lowerHost.startsWith("169.254.")) return false;
+                if (lowerHost.equals("0.0.0.0")) return false;
+                if (lowerHost.startsWith("172.")) {
+                    String[] parts = lowerHost.split("\\.");
+                    if (parts.length >= 2) {
+                        try {
+                            int second = Integer.parseInt(parts[1]);
+                            if (second >= 16 && second <= 31) return false;
+                        } catch (NumberFormatException ignored) {}
+                    }
+                }
+            }
+            if (lowerHost.equals("::1") || lowerHost.startsWith("fe80:")
+                    || lowerHost.startsWith("fc") || lowerHost.startsWith("fd")) return false;
+            return true;
+        } catch (Exception e) {
+            return false;
         }
     }
 
