@@ -119,6 +119,7 @@ napcat:
     enabled: false                      # 是否启用长期记忆
     max-results: 5                      # 每次对话检索记忆条数
     extract-threshold: 20               # 累积多少条消息后触发 LLM 提取
+    test-data-enabled: false            # 启动时自动注入测试记忆数据（仅测试使用）
 
   # ========== 定时任务调度 ==========
   scheduler:
@@ -286,8 +287,15 @@ napcat:
 | `enabled` | boolean | `false` | 是否启用长期记忆功能 |
 | `max-results` | int | `5` | 每次对话时从记忆库检索的最大条数 |
 | `extract-threshold` | int | `20` | 会话中累积多少条非 system 消息后，触发 LLM 异步提取记忆 |
+| `test-data-enabled` | boolean | `false` | 启动时自动注入测试记忆数据，用于本地测试归纳和检索功能 |
 
 启用后，Agent 会在对话中自动提取用户的关键事实、偏好和重要话题，存入 SQLite。新会话启动时会自动检索相关记忆并注入 system prompt。
+
+**数据流：**
+- 对话中 → `MemoryExtractor` 异步提取结构化记忆 → `memories` 表（type=fact/preference/topic）
+- `/new` / 过期清理 / 程序关闭 → `persistFullSession` → `memories` 表（type=full_session，仅备份）
+- 每日凌晨 1 点 → `DailyMemorySummarizer` 读取当天结构化记忆 → LLM 归纳 → `memory_summaries` 表
+- 新会话启动 → 优先检索 `memory_summaries`（归纳摘要），其次检索 `memories`（碎片化记忆）
 
 ---
 

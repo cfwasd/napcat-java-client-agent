@@ -61,8 +61,8 @@ Spring ApplicationContext 初始化
   │     ├─ 如 agent.enabled=true：
   │     │     ├─ 扫描所有 Bean 的 @Tool 方法 → ToolRegistry
   │     │     ├─ 创建 SessionManager
-  │     │     ├─ 创建 NapCatAgent
-      │     │     ├─ 如 memory.enabled=true：创建 SqliteMemoryStore + MemoryExtractor
+  │     │     ├─ 创建 NapCatAgent（Supplier<MemoryExtractor> 打破循环依赖）
+      │     │     ├─ 如 memory.enabled=true：创建 SqliteMemoryStore + MigrationManager（建表/验字段）+ MemoryExtractor
       │     │     ├─ 如 scheduler.enabled=true：创建 ScheduleStore + TimerWheel + SchedulePoller + TaskExecutor + ScheduleTool
   │     └─ 注册 NapCatBeanPostProcessor + NapCatLifecycle
   │
@@ -75,11 +75,25 @@ Spring ApplicationContext 初始化
         ├─ 绑定 MessageRouter → EventDispatcher 管道
         ├─ 如 scheduler.enabled=true：启动 SchedulePoller，注册 ScheduleTool，注册每日记忆归纳任务
         ├─ 启动会话过期清理线程（每 30 分钟）
+        ├─ 如 memory.test-data-enabled=true：注入测试记忆数据
         ├─ 如 at-me-trigger=true：注册兜底 Agent Handler
         └─ 启动所有 BotAdapter
 ```
 
-### 2.2 事件处理流程
+### 2.2 关闭流程
+
+```
+Spring 容器关闭
+  │
+  └─ NapCatLifecycle.stop()
+        ├─ 将所有内存中未保存的会话历史追加存入 SQLite（防止重启丢失）
+        ├─ 停止 SchedulePoller
+        ├─ 关闭 NapCatApi
+        ├─ 关闭会话过期清理线程
+        └─ 停止所有 BotAdapter
+```
+
+### 2.3 事件处理流程
 
 ```
 NapCat 上报事件（JSON）
@@ -109,12 +123,12 @@ EventDispatcher.dispatch(event)
 
 **执行顺序详解：**
 
-1. **命令匹配**：遍历所有 `@Command` 注册的命令模板，匹配成功的按注册顺序执行
-2. **注解 handler**：按优先级（Command=1, Mention/Wake=10, 普通=100）排序后顺序执行
+1. **命令匹配**：遍历所有 `@Command` 注册的命令模板，匹配成功的按注册顺序执行，默认阻止后续 handler
+2. **注解 handler**：按优先级排序（各注解 `priority()` 的最小值），数值越小越先执行；同优先级按 `@Order` 排序
 3. **接口 handler**：执行所有 `EventHandler` 接口实现
 4. **fallback**：如果以上均未命中且配置了 `fallbackHandler`（如 `at-me-trigger`），则执行兜底
 
-### 2.3 ReAct Agent 流程
+### 2.4 ReAct Agent 流程
 
 ```
 NapCatAgent.chat(SessionKey, input, config)
@@ -230,6 +244,7 @@ NapCatAgent
   ├─ llmProvider: LlmProvider
   ├─ toolRegistry: ToolRegistry
   ├─ sessionManager: SessionManager
+  ├─ memoryExtractorSupplier: Supplier<MemoryExtractor>  // 延迟获取，打破循环依赖
   ├─ defaultSystemPrompt: String
   ├─ defaultMaxRounds: int
   ├─ chat(long userId, long groupId, String input): CompletableFuture<String>
@@ -258,6 +273,7 @@ SessionManager
 MemoryStore (interface)
   ├─ retrieve(SessionKey, String, int): List<String>
   ├─ persist(SessionKey, String, String): void
+  ├─ persistFullSession(SessionKey, String): void
   ├─ summarize(SessionKey, String, String): void
   └─ clear(SessionKey): void
 
@@ -266,7 +282,7 @@ MemoryExtractor
   └─ extractAndPersistSync(SessionKey, Session): void  // 同步提取（/new 前）
 
 DailyMemorySummarizer
-  └─ runDailySummary(): void  // 凌晨 1 点触发，并行归纳所有用户记忆
+  └─ runDailySummary(): void  // 凌晨 1 点触发，每个用户每天只归纳一次，携带最近 7 天历史摘要做累积式归纳
 
 ScheduleStore
   ├─ insert(ScheduleEntry): String

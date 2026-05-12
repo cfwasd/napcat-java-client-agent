@@ -455,10 +455,23 @@ Agent 内部对常见错误做了处理：
 
 ### 10.1 工作原理
 
-1. **记忆提取**：对话结束后，`MemoryExtractor` 异步调用 LLM，从会话历史中提取结构化记忆（fact / preference / topic）
-2. **记忆存储**：提取结果存入 `memories` 表，按 `user_id + group_id` 隔离
-3. **记忆检索**：新会话启动时，`NapCatAgent` 自动从 `MemoryStore` 检索相关记忆，追加到 system prompt
-4. **每日归纳**：凌晨 1 点定时任务触发 `DailyMemorySummarizer`，将当天所有碎片化记忆归纳为一段摘要，存入 `memory_summaries` 表（优先检索）
+```
+对话中 ──→ MemoryExtractor 异步提取结构化记忆 ──→ memories 表（type=fact/preference/topic）
+                                                          │
+/new、过期清理、程序关闭 ──→ persistFullSession ──→ memories 表（type=full_session，仅备份）
+                                                          │
+每日凌晨 1 点 ──→ DailyMemorySummarizer 读取当天结构化记忆 ──→ LLM 归纳 ──→ memory_summaries 表
+                                                          │
+新会话启动 ──→ NapCatAgent 检索 ──→ 优先 memory_summaries（归纳摘要），其次 memories（碎片化记忆）
+```
+
+**设计要点：**
+
+1. **记忆提取**：对话中累积 `extract-threshold` 条消息后，`MemoryExtractor` 异步调用 LLM，从会话历史提取结构化记忆（fact / preference / topic）
+2. **追加存储**：所有记忆写入均为 `INSERT`，**不会覆盖历史数据**。同一天可产生多条碎片化记忆
+3. **全量备份**：`/new`、`/clear`、会话过期或程序关闭前，当前会话历史会以 `type=full_session` 追加存入数据库，仅作备份不用于日常检索
+4. **每日归纳**：凌晨 1 点定时任务遍历每个用户，将当天碎片化记忆与最近 7 天历史摘要合并，由 LLM 生成**累积式摘要**（去重、连贯的用户画像），存入 `memory_summaries`。每个用户**每天只归纳一次**
+5. **记忆检索**：新会话启动时，优先检索 `memory_summaries`（归纳摘要），其次检索 `memories`（碎片化事实），按 `created_at` 倒序取最新内容
 
 ### 10.2 启用配置
 
@@ -466,11 +479,12 @@ Agent 内部对常见错误做了处理：
 napcat:
   memory:
     enabled: true
-    max-results: 5          # 每次对话检索记忆条数
-    extract-threshold: 20   # 累积多少条消息后触发提取
+    max-results: 5           # 每次对话检索记忆条数
+    extract-threshold: 20    # 累积多少条消息后触发提取
+    test-data-enabled: false # 启动时自动注入测试记忆数据（仅本地测试使用）
 ```
 
-### 10.3 手动清除记忆
+### 10.3 手动管理记忆
 
 ```java
 @Autowired
@@ -480,7 +494,11 @@ private MemoryStore memoryStore;
 memoryStore.clear(new SessionKey(userId, groupId));
 ```
 
-**注意**：`/new` 或 `/clear` 命令仅重置**会话上下文**，**不会**清除持久化记忆。
+**注意**：`/new` 或 `/clear` 命令仅重置**会话上下文**。执行 `/new` 前框架会自动提取并持久化当前会话的记忆，不会丢失。
+
+### 10.4 测试数据注入
+
+开发测试时可开启 `test-data-enabled: true`，启动时自动注入多用户、多群、多天的模拟记忆数据，用于验证归纳和检索效果。数据注入后可通过 `/summarize` 命令手动触发每日归纳，立即观察摘要生成结果。
 
 ---
 

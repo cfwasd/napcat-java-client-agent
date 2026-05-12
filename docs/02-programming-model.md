@@ -24,10 +24,11 @@
 ```java
 public @interface OnGroupMessage {
     long[] botId() default {};
+    int priority() default 100;     // 数值越小优先级越高
 }
 
 public @interface OnPrivateMessage {
-    long[] botId() default {};
+    int priority() default 100;
 }
 ```
 
@@ -72,6 +73,9 @@ public void onAny(MessageEvent event) {
 ```java
 public @interface Command {
     String value();
+    int priority() default 1;           // 优先级，数值越小越先执行
+    String description() default "";    // 命令描述，用于 /help 展示
+    boolean adminOnly() default false;  // true 时普通成员在 /help 中看不到
 }
 ```
 
@@ -155,10 +159,12 @@ public class CommandArgs {
 
 ```java
 public @interface MentionFilter {
+    int priority() default 10;
 }
 
 public @interface RoleFilter {
     Role value();
+    int priority() default 10;
     enum Role { OWNER, ADMIN, MEMBER, SUPERUSER }
 }
 
@@ -168,6 +174,7 @@ public @interface RoleFilter {
  * 与 @MentionFilter 同时标注时取 AND 语义（需同时满足才触发）。
  */
 public @interface WakeFilter {
+    int priority() default 10;
 }
 ```
 
@@ -181,11 +188,12 @@ public void onAtMe(GroupMessageEvent event) {
     event.reply("你叫我？");
 }
 
-// 只有管理员才能执行
+// 管理员或超级用户才能执行（群聊和私聊均生效）
 @OnGroupMessage
+@OnPrivateMessage
 @Command("/清理")
-@RoleFilter(RoleFilter.Role.ADMIN)
-public void clear(GroupMessageEvent event) {
+@RoleFilter(RoleFilter.Role.SUPERUSER)
+public void clear(MessageEvent event) {
     // ...
 }
 
@@ -502,16 +510,17 @@ public void filterSpam(GroupMessageEvent event) {
 
 ### 5.1 路由优先级
 
-框架按**优先级数值从小到大**依次匹配并执行（数值越小越先执行）。各注解组合的优先级如下：
+框架按**优先级数值从小到大**依次匹配并执行（数值越小越先执行）。每个方法可能叠加多个注解，最终优先级取**所有注解 priority 的最小值**：
 
-| 优先级数值 | 注解组合 |
-|-----------|---------|
-| 1 | `@Command` |
-| 10 | `@MentionFilter`（无 `@Command` 时）|
-| 10 | `@WakeFilter`（无 `@Command` 时）|
-| 100 | 纯 `@OnGroupMessage` / `@OnPrivateMessage` |
+| 优先级数值 | 注解组合 | 说明 |
+|-----------|---------|------|
+| 1 | `@Command` | 默认 1，可通过 `priority()` 自定义 |
+| 10 | `@MentionFilter` | 默认 10，可通过 `priority()` 自定义 |
+| 10 | `@WakeFilter` | 默认 10，可通过 `priority()` 自定义 |
+| 10 | `@RoleFilter` | 默认 10，可通过 `priority()` 自定义 |
+| 100 | `@OnGroupMessage` / `@OnPrivateMessage` | 默认 100，可通过 `priority()` 自定义 |
 
-**注意：** `@Command` 与 `@MentionFilter`/`@WakeFilter` 叠加时，优先级仍为 1（因为 `Command` 优先级最高）。
+**示例：** 一个方法同时标注 `@Command(priority=5)` 和 `@OnGroupMessage(priority=50)`，最终优先级取最小值 `5`。
 
 同一优先级的处理器按**注册顺序**执行。
 
@@ -529,4 +538,4 @@ public class HighPriorityHandler { }
 
 默认情况下，匹配的处理器会**顺序执行**。抛出 `StopRoutingException` 才会阻止后续处理器执行（见上文）。
 
-命令匹配同样遵循此规则：如果一条消息匹配多个命令模板，可能触发多个命令处理器。
+**命令匹配特殊行为：** 命令匹配成功后，框架默认**直接返回**，不再执行后续注解 handler 和接口 handler。只有当命令 handler 内部抛出 `StopRoutingException` 时才会正常中断。

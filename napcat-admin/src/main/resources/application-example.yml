@@ -2,6 +2,10 @@ server:
   port: 8080
 
 napcat:
+  memory:
+    enabled: true
+  core:
+    database-path: napcat_data/napcat.db
   adapter:
     type: websocket-client
     websocket-client:
@@ -16,29 +20,39 @@ napcat:
     wake-words:
       - emiya
       - 小助手
+    super-users:
+      - 114511   # 你的QQ号
 
   llm:
     provider: openai
     openai:
       base-url: http://127.0.0.1:12345/v1  # 请修改为你的 LLM API 地址
       api-key: ${OPENAI_API_KEY:your-api-key-here}  # 建议使用环境变量
-      model: qwen3.5-4b  # 请修改为你使用的模型名称
+      model: model  # 请修改为你使用的模型名称
   #      base-url: https://api.deepseek.com
   #      api-key: ${OPENAI_API_KEY:your-deepseek-api-key}
   #      model: deepseek-v4-flash
-
+  fallback:
+    enabled: true  # 是否启用备用模型
+    provider: openai  # 备用模型的类型：openai / anthropic / ollama / custom
+    base-url: http://127.0.0.1:12345/v1  # 请修改为你的 LLM API 地址
+    api-key: ${OPENAI_API_KEY:api-key}
+    model: model
+    timeout: 240000
+    max-tokens: 12000
+    temperature: 0.5
   agent:
     enabled: true
     max-react-rounds: 5
-    system-prompt: "你是一个有用的 QQ 机器人助手。"
-    show-tool-process: true          # 将工具调用过程发送到群聊
-    session-ttl: 7200  # 延长到 2 小时
-    max-history-messages: 40  # 保持最近 40 条消息
-    enable-vision: true  # 是否启用图片识别功能（如果LLM服务器无法访问QQ图片链接，建议关闭）
+    system-prompt: "你是一个友好的聊天助手，主要与用户进行自然对话。\n重要规则：\n1. 优先进行自然、流畅的对话交流，像朋友一样聊天。\n2. 只有在用户明确需要实时信息（如新闻、天气、股票等）时，才使用 web_search 工具。\n3. 只有当用户发送了具体的 URL 链接并询问其内容时，才使用 fetch_url 工具。\n4. 只有当用户明确询问当前时间或日期时，才使用 get_current_time 工具。\n5. 对于日常聊天、情感交流、知识问答、创意写作等场景，直接使用你的知识库回答，不要调用工具。\n6. 保持回复简洁、友好、自然，避免过度正式或机械化的表达。\n7. 如果不确定是否需要工具，优先选择直接回答而不是调用工具。\n8. 当用户要求定时提醒时，使用 create_schedule 工具。参数说明：cron=Cron表达式（如'0 29 15 * * ?'），name=任务名称，replyText=提醒文本，targetId留空则自动使用当前对话对象。"
+    show-tool-process: true
+    session-ttl: 7200
+    max-history-messages: 40
+    enable-vision: true
     builtin:
       web-search:
         enabled: true
-        instance: http://127.0.0.1:18080  # 请修改为你的 SearxNG 地址
+        instance: http://127.0.0.1:18080
         result-count: 5
 
 logging:
