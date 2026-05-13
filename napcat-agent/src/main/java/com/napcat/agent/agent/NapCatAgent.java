@@ -116,18 +116,7 @@ public class NapCatAgent {
         if (session.getHistory().isEmpty()) {
             String prompt = buildEffectivePrompt(config);
             if (prompt != null && !prompt.isBlank()) {
-                // 注入长期记忆
-                if (config.isMemoryEnabled() && memoryStore != null) {
-                    java.util.List<String> memories = memoryStore.retrieve(sessionKey, input, config.getMemoryMaxResults());
-                    if (!memories.isEmpty()) {
-                        StringBuilder memText = new StringBuilder(prompt);
-                        memText.append("\n\n## 关于用户的已知信息\n");
-                        for (String m : memories) {
-                            memText.append("- ").append(m).append("\n");
-                        }
-                        prompt = memText.toString();
-                    }
-                }
+                // 自动记忆注入已关闭，改由 Agent 通过 retrieve_memory 工具按需检索
                 session.addMessage(new ChatMessage("system", prompt, null));
             }
         }
@@ -200,23 +189,26 @@ public class NapCatAgent {
             sb.append(prompt);
         }
 
-        List<ToolSchema> tools = toolRegistry.getSchemas();
-        if (!tools.isEmpty()) {
-            sb.append("\n\n可用工具：\n");
-            for (ToolSchema tool : tools) {
-                sb.append("\n- **").append(tool.getName()).append("**：").append(tool.getDescription()).append("\n");
-                if (tool.getParameters() != null && !tool.getParameters().isEmpty()) {
-                    sb.append("  参数：\n");
-                    for (var entry : tool.getParameters().entrySet()) {
-                        boolean required = tool.getRequired() != null && tool.getRequired().contains(entry.getKey());
-                        sb.append("    - ").append(entry.getKey())
-                          .append(" (").append(entry.getValue().getType()).append(")")
-                          .append(required ? " [必填]" : " [可选]")
-                          .append("：").append(entry.getValue().getDescription()).append("\n");
+        // disableTools 时不在 system prompt 中注入工具说明，避免 LLM 文本层面误调用
+        if (!config.isDisableTools()) {
+            List<ToolSchema> tools = toolRegistry.getSchemas();
+            if (!tools.isEmpty()) {
+                sb.append("\n\n可用工具：\n");
+                for (ToolSchema tool : tools) {
+                    sb.append("\n- **").append(tool.getName()).append("**：").append(tool.getDescription()).append("\n");
+                    if (tool.getParameters() != null && !tool.getParameters().isEmpty()) {
+                        sb.append("  参数：\n");
+                        for (var entry : tool.getParameters().entrySet()) {
+                            boolean required = tool.getRequired() != null && tool.getRequired().contains(entry.getKey());
+                            sb.append("    - ").append(entry.getKey())
+                              .append(" (").append(entry.getValue().getType()).append(")")
+                              .append(required ? " [必填]" : " [可选]")
+                              .append("：").append(entry.getValue().getDescription()).append("\n");
+                        }
                     }
                 }
+                sb.append("\n仅在用户明确要求时才调用工具，非必要不调用。\n");
             }
-            sb.append("\n仅在用户明确要求时才调用工具，非必要不调用。\n");
         }
 
         return sb.toString().trim().isEmpty() ? null : sb.toString().trim();
@@ -232,7 +224,7 @@ public class NapCatAgent {
 
         log.debug("[Agent] Round {}/{} for {}", round + 1, config.getMaxRounds(), session.getKey());
 
-        List<ToolSchema> tools = toolRegistry.getSchemas();
+        List<ToolSchema> tools = config.isDisableTools() ? java.util.Collections.emptyList() : toolRegistry.getSchemas();
 
         return llmProvider.chat(session, null, tools)
                 .thenCompose(response -> {
@@ -268,9 +260,9 @@ public class NapCatAgent {
                         }
                         session.addMessage(assistantMsg);
 
-                        // 触发记忆提取（异步，不阻塞响应）
+                        // 触发记忆提取（异步，不阻塞响应；内部调用跳过避免递归）
                         MemoryExtractor extractor = getMemoryExtractor();
-                        if (config.isMemoryEnabled() && extractor != null) {
+                        if (config.isMemoryEnabled() && extractor != null && !config.isInternalCall()) {
                             extractor.extractIfNeeded(session.getKey(), session);
                         }
 

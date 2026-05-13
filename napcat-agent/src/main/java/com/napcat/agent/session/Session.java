@@ -47,7 +47,12 @@ public class Session {
         return key.groupId();
     }
 
-    public void addMessage(ChatMessage message) {
+    /** 返回历史消息快照（副本），避免外部遍历时的并发修改异常 */
+    public synchronized List<ChatMessage> getHistory() {
+        return new ArrayList<>(history);
+    }
+
+    public synchronized void addMessage(ChatMessage message) {
         history.add(message);
         lastAccessedAt = System.currentTimeMillis();
         truncateHistory();
@@ -86,8 +91,20 @@ public class Session {
         return (System.currentTimeMillis() - lastAccessedAt) > ttlSeconds * 1000;
     }
 
-    public void clear() {
+    public synchronized void clear() {
         history.clear();
         lastAccessedAt = System.currentTimeMillis();
+    }
+
+    /** 原子获取格式化的历史记录文本，用于持久化前读取 */
+    public synchronized String getFormattedHistory() {
+        StringBuilder sb = new StringBuilder();
+        for (ChatMessage msg : history) {
+            if ("user".equals(msg.getRole()) || "assistant".equals(msg.getRole())) {
+                sb.append("[").append(msg.getRole()).append("]: ")
+                  .append(msg.getContent() != null ? msg.getContent() : "").append("\n");
+            }
+        }
+        return sb.toString().trim();
     }
 }

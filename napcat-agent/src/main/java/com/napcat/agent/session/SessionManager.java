@@ -99,21 +99,10 @@ public class SessionManager {
             for (Map.Entry<SessionKey, Session> entry : sessions.entrySet()) {
                 Session session = entry.getValue();
                 if (session.isExpired(ttlSeconds) && !session.getHistory().isEmpty()) {
-                    memoryStore.persistFullSession(entry.getKey(), formatSessionHistory(session));
+                    memoryStore.persistFullSession(entry.getKey(), session.getFormattedHistory());
                 }
             }
         }
         sessions.entrySet().removeIf(e -> e.getValue().isExpired(ttlSeconds));
-    }
-
-    private String formatSessionHistory(Session session) {
-        StringBuilder sb = new StringBuilder();
-        for (var msg : session.getHistory()) {
-            if ("user".equals(msg.getRole()) || "assistant".equals(msg.getRole())) {
-                sb.append("[").append(msg.getRole()).append("]: ")
-                        .append(msg.getContent() != null ? msg.getContent() : "").append("\n");
-            }
-        }
-        return sb.toString().trim();
     }
 }

@@ -232,14 +232,7 @@ public class NapCatLifecycle implements SmartLifecycle {
     }
 
     private String formatSessionHistory(com.napcat.agent.session.Session session) {
-        StringBuilder sb = new StringBuilder();
-        for (var msg : session.getHistory()) {
-            if ("user".equals(msg.getRole()) || "assistant".equals(msg.getRole())) {
-                sb.append("[").append(msg.getRole()).append("]: ")
-                        .append(msg.getContent() != null ? msg.getContent() : "").append("\n");
-            }
-        }
-        return sb.toString().trim();
+        return session.getFormattedHistory();
     }
 
     @Override

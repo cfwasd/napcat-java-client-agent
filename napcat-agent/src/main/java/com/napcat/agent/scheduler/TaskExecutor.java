@@ -125,6 +125,7 @@ public class TaskExecutor {
         com.napcat.agent.agent.AgentConfig config = com.napcat.agent.agent.AgentConfig.builder()
                 .systemPrompt(finalSystemPrompt)
                 .maxRounds(1)  // 只需要一轮对话
+                .internalCall(true)  // 定时任务不触发记忆注入/提取，避免污染用户记忆
                 .build();
         
         agent.chat(isPrivate ? targetId : 0, isPrivate ? 0 : targetId, finalPrompt, config, null)

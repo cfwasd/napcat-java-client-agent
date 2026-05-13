@@ -16,7 +16,7 @@ import java.util.UUID;
 /**
  * SQLite 实现的长记忆存储。
  * 按 (userId, groupId) 隔离，支持关键词匹配检索。
- * 
+ *
  * 两层结构：
  * - memories 表：即时提取的碎片化记忆（fact / preference / topic）
  * - memory_summaries 表：每日凌晨归纳的摘要（优先检索）
@@ -26,6 +26,7 @@ public class SqliteMemoryStore implements MemoryStore {
 
     private final DbManager dbManager;
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    private static final java.time.ZoneId UTC = java.time.ZoneId.of("UTC");
 
     public SqliteMemoryStore(DbManager dbManager) {
         this.dbManager = dbManager;
@@ -69,44 +70,17 @@ public class SqliteMemoryStore implements MemoryStore {
         List<String> results = new ArrayList<>();
         int remaining = limit;
 
-        // 第一步：检索 memory_summaries（归纳表优先，同一天取最新）
+        // 第一步：检索 memory_summaries（归纳表优先）
+        String sql1;
         if (query != null && !query.isBlank()) {
-            String sql = "SELECT content FROM memory_summaries WHERE user_id = ? AND group_id = ? AND content LIKE ? " +
+            sql1 = "SELECT content FROM memory_summaries WHERE user_id = ? AND group_id = ? AND content LIKE ? " +
                     "ORDER BY summary_date DESC, created_at DESC LIMIT ?";
-            try (Connection conn = dbManager.getConnection();
-                 PreparedStatement ps = conn.prepareStatement(sql)) {
-                ps.setLong(1, key.userId());
-                ps.setLong(2, key.groupId());
-                ps.setString(3, "%" + query + "%");
-                ps.setInt(4, remaining);
-                try (ResultSet rs = ps.executeQuery()) {
-                    while (rs.next()) {
-                        String content = rs.getString("content");
-                        if (content != null && !content.isBlank()) {
-                            results.add("📋 " + content);
-                        }
-                    }
-                }
-            } catch (SQLException e) {
-                log.error("Failed to retrieve summaries for {}", key, e);
-            }
-        }
-
-        remaining = limit - results.size();
-        if (remaining <= 0) return results;
-
-        // 第二步：检索 memories（明细表兜底，按时间倒序取最新）
-        String sql;
-        if (query != null && !query.isBlank()) {
-            sql = "SELECT content FROM memories WHERE user_id = ? AND group_id = ? AND content LIKE ? " +
-                    "ORDER BY created_at DESC LIMIT ?";
         } else {
-            sql = "SELECT content FROM memories WHERE user_id = ? AND group_id = ? " +
-                    "ORDER BY created_at DESC LIMIT ?";
+            sql1 = "SELECT content FROM memory_summaries WHERE user_id = ? AND group_id = ? " +
+                    "ORDER BY summary_date DESC, created_at DESC LIMIT ?";
         }
-
         try (Connection conn = dbManager.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+             PreparedStatement ps = conn.prepareStatement(sql1)) {
             ps.setLong(1, key.userId());
             ps.setLong(2, key.groupId());
             if (query != null && !query.isBlank()) {
@@ -117,7 +91,45 @@ public class SqliteMemoryStore implements MemoryStore {
             }
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    results.add(rs.getString("content"));
+                    String content = rs.getString("content");
+                    if (content != null && !content.isBlank()) {
+                        results.add("📋 " + content);
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to retrieve summaries for {}", key, e);
+        }
+
+        remaining = limit - results.size();
+        if (remaining <= 0) return results;
+
+        // 第二步：检索 memories（明细表兜底，按时间倒序取最新）
+        String sql2;
+        if (query != null && !query.isBlank()) {
+            sql2 = "SELECT content FROM memories WHERE user_id = ? AND group_id = ? AND content LIKE ? " +
+                    "ORDER BY created_at DESC LIMIT ?";
+        } else {
+            sql2 = "SELECT content FROM memories WHERE user_id = ? AND group_id = ? " +
+                    "ORDER BY created_at DESC LIMIT ?";
+        }
+
+        try (Connection conn = dbManager.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql2)) {
+            ps.setLong(1, key.userId());
+            ps.setLong(2, key.groupId());
+            if (query != null && !query.isBlank()) {
+                ps.setString(3, "%" + query + "%");
+                ps.setInt(4, remaining);
+            } else {
+                ps.setInt(3, remaining);
+            }
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String content = rs.getString("content");
+                    if (content != null && !content.isBlank()) {
+                        results.add(content);
+                    }
                 }
             }
         } catch (SQLException e) {
@@ -127,13 +139,141 @@ public class SqliteMemoryStore implements MemoryStore {
     }
 
     // ================================================================
+    // retrieveByDate — 按日期检索，先归纳库后全量库
+    // ================================================================
+
+    @Override
+    public List<String> retrieveByDate(SessionKey key, String date, int limit) {
+        List<String> results = new ArrayList<>();
+
+        // 第一步：查归纳库 memory_summaries
+        String sql1 = "SELECT content FROM memory_summaries WHERE user_id = ? AND group_id = ? AND summary_date = ? LIMIT ?";
+        try (Connection conn = dbManager.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql1)) {
+            ps.setLong(1, key.userId());
+            ps.setLong(2, key.groupId());
+            ps.setString(3, date);
+            ps.setInt(4, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String content = rs.getString("content");
+                    if (content != null && !content.isBlank()) {
+                        results.add("📋 " + content);
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to retrieve summaries by date for {} on {}", key, date, e);
+        }
+
+        if (!results.isEmpty()) {
+            return results;
+        }
+
+        // 第二步：归纳库无结果，查全量库 memories
+        String sql2 = "SELECT type, content FROM memories WHERE user_id = ? AND group_id = ? AND date(created_at) = ? LIMIT ?";
+        try (Connection conn = dbManager.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql2)) {
+            ps.setLong(1, key.userId());
+            ps.setLong(2, key.groupId());
+            ps.setString(3, date);
+            ps.setInt(4, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String type = rs.getString("type");
+                    String content = rs.getString("content");
+                    if (content != null && !content.isBlank()) {
+                        if ("full_session".equals(type)) {
+                            String truncated = content.length() > 300 ? content.substring(0, 300) + "…" : content;
+                            results.add("[对话片段] " + truncated);
+                        } else {
+                            results.add(content);
+                        }
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to retrieve memories by date for {} on {}", key, date, e);
+        }
+
+        return results;
+    }
+
+    // ================================================================
+    // retrieveCandidatesByDateRange — 按日期范围拉取候选记忆（归纳+全量）
+    // ================================================================
+
+    @Override
+    public List<CandidateMemory> retrieveCandidatesByDateRange(SessionKey key, LocalDate startDate, LocalDate endDate) {
+        List<CandidateMemory> candidates = new ArrayList<>();
+        String start = startDate.format(DATE_FMT);
+        String end = endDate.format(DATE_FMT);
+
+        // 第一步：归纳库
+        String sql1 = "SELECT summary_date, content FROM memory_summaries WHERE user_id = ? AND group_id = ? AND summary_date BETWEEN ? AND ? ORDER BY summary_date DESC";
+        try (Connection conn = dbManager.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql1)) {
+            ps.setLong(1, key.userId());
+            ps.setLong(2, key.groupId());
+            ps.setString(3, start);
+            ps.setString(4, end);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String content = rs.getString("content");
+                    String date = rs.getString("summary_date");
+                    if (content != null && !content.isBlank()) {
+                        candidates.add(new CandidateMemory(content, "summary", date));
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to retrieve summary candidates for {} range {}~{}", key, start, end, e);
+        }
+
+        // 第二步：全量库
+        String sql2 = "SELECT type, content, date(created_at) as dt FROM memories WHERE user_id = ? AND group_id = ? AND date(created_at) BETWEEN ? AND ? ORDER BY created_at DESC";
+        try (Connection conn = dbManager.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql2)) {
+            ps.setLong(1, key.userId());
+            ps.setLong(2, key.groupId());
+            ps.setString(3, start);
+            ps.setString(4, end);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String type = rs.getString("type");
+                    String content = rs.getString("content");
+                    String date = rs.getString("dt");
+                    if (content != null && !content.isBlank()) {
+                        if ("full_session".equals(type)) {
+                            // 截断避免过长
+                            String truncated = content.length() > 500 ? content.substring(0, 500) + "…" : content;
+                            candidates.add(new CandidateMemory(truncated, "full_session", date));
+                        } else {
+                            candidates.add(new CandidateMemory(content, type, date));
+                        }
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to retrieve memory candidates for {} range {}~{}", key, start, end, e);
+        }
+
+        return candidates;
+    }
+
+    // ================================================================
     // persist
     // ================================================================
 
     @Override
     public void persist(SessionKey key, String content, String type) {
+        persist(key, content, type, 1);
+    }
+
+    @Override
+    public void persist(SessionKey key, String content, String type, int importance) {
         String id = UUID.randomUUID().toString().replace("-", "").substring(0, 12);
-        String sql = "INSERT INTO memories (id, user_id, group_id, content, type) VALUES (?, ?, ?, ?, ?)";
+        String sql = "INSERT INTO memories (id, user_id, group_id, content, type, importance) VALUES (?, ?, ?, ?, ?, ?)";
         try (Connection conn = dbManager.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, id);
@@ -141,8 +281,9 @@ public class SqliteMemoryStore implements MemoryStore {
             ps.setLong(3, key.groupId());
             ps.setString(4, content);
             ps.setString(5, type);
+            ps.setInt(6, importance);
             ps.executeUpdate();
-            log.debug("Memory persisted: userId={}, type={}", key.userId(), type);
+            log.debug("Memory persisted: userId={}, type={}, importance={}", key.userId(), type, importance);
         } catch (SQLException e) {
             log.error("Failed to persist memory for {}", key, e);
         }
@@ -231,14 +372,13 @@ public class SqliteMemoryStore implements MemoryStore {
     }
 
     /**
-     * 获取指定用户键当天所有碎片化记忆内容（排除 full_session，避免重复）。
+     * 获取指定用户键当天所有记忆内容（包含 full_session，因为归纳需要从全量对话中提取摘要）。
      * 用于 LLM 每日归纳。
      * @return 拼接后的文本，若当天无记忆则返回 null
      */
     public String getTodayMemories(SessionKey key) {
-        String today = LocalDate.now().format(DATE_FMT);
-        // 排除 full_session：全量会话和碎片化记忆内容重叠，归纳时只需结构化记忆
-        String sql = "SELECT type, content FROM memories WHERE user_id = ? AND group_id = ? AND date(created_at) = ? AND type != 'full_session' " +
+        String today = LocalDate.now(UTC).format(DATE_FMT);
+        String sql = "SELECT type, content FROM memories WHERE user_id = ? AND group_id = ? AND date(created_at) = ? " +
                 "ORDER BY created_at ASC";
         StringBuilder sb = new StringBuilder();
         int count = 0;
@@ -252,7 +392,13 @@ public class SqliteMemoryStore implements MemoryStore {
                     String type = rs.getString("type");
                     String content = rs.getString("content");
                     if (content != null && !content.isBlank()) {
-                        sb.append("- [").append(type).append("] ").append(content).append("\n");
+                        if ("full_session".equals(type)) {
+                            // 全量会话内容较多，只截取前2000字用于归纳
+                            String truncated = content.length() > 2000 ? content.substring(0, 2000) + "…" : content;
+                            sb.append("- [session] ").append(truncated).append("\n");
+                        } else {
+                            sb.append("- [").append(type).append("] ").append(content).append("\n");
+                        }
                         count++;
                     }
                 }
@@ -282,8 +428,72 @@ public class SqliteMemoryStore implements MemoryStore {
         return false;
     }
 
+    // ================================================================
+    // retrieveSummaries — 仅查归纳库
+    // ================================================================
+
+    @Override
+    public List<String> retrieveSummaries(SessionKey key, String query, int limit) {
+        List<String> results = new ArrayList<>();
+        String sql;
+        if (query != null && !query.isBlank()) {
+            sql = "SELECT summary_date, content FROM memory_summaries WHERE user_id = ? AND group_id = ? AND content LIKE ? ORDER BY summary_date DESC, created_at DESC LIMIT ?";
+        } else {
+            sql = "SELECT summary_date, content FROM memory_summaries WHERE user_id = ? AND group_id = ? ORDER BY summary_date DESC, created_at DESC LIMIT ?";
+        }
+        try (Connection conn = dbManager.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, key.userId());
+            ps.setLong(2, key.groupId());
+            if (query != null && !query.isBlank()) {
+                ps.setString(3, "%" + query + "%");
+                ps.setInt(4, limit);
+            } else {
+                ps.setInt(3, limit);
+            }
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String date = rs.getString("summary_date");
+                    String content = rs.getString("content");
+                    if (content != null && !content.isBlank()) {
+                        results.add("📋 【" + date + "】 " + content);
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to retrieve summaries for {}", key, e);
+        }
+        return results;
+    }
+
+    @Override
+    public List<String> retrieveRecentSummaries(SessionKey key, int days, int limit) {
+        List<String> results = new ArrayList<>();
+        String cutoff = LocalDate.now(UTC).minusDays(days).format(DATE_FMT);
+        String sql = "SELECT summary_date, content FROM memory_summaries WHERE user_id = ? AND group_id = ? AND summary_date >= ? ORDER BY summary_date DESC LIMIT ?";
+        try (Connection conn = dbManager.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, key.userId());
+            ps.setLong(2, key.groupId());
+            ps.setString(3, cutoff);
+            ps.setInt(4, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String date = rs.getString("summary_date");
+                    String content = rs.getString("content");
+                    if (content != null && !content.isBlank()) {
+                        results.add("📋 【" + date + "】 " + content);
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to retrieve recent summaries for {}", key, e);
+        }
+        return results;
+    }
+
     /**
-     * 获取指定用户键最近 N 天的历史归纳摘要。
+     * 获取指定用户键最近 N 条历史归纳摘要（内部使用，用于每日归纳时拉取上下文）。
      * @return 按日期从新到旧排列的摘要列表
      */
     public List<String> getRecentSummaries(SessionKey key, int days) {

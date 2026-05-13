@@ -41,4 +41,10 @@ public class AgentConfig {
     /** 累积多少条消息后触发记忆提取（0=不自动提取） */
     @Builder.Default
     private int memoryExtractThreshold = 20;
+    /** 内部调用标志，为 true 时跳过记忆注入和提取，避免递归（如 DailyMemorySummarizer 调用 LLM） */
+    @Builder.Default
+    private boolean internalCall = false;
+    /** 禁用工具调用，用于内部任务（如记忆归纳）避免触发不必要的工具链 */
+    @Builder.Default
+    private boolean disableTools = false;
 }

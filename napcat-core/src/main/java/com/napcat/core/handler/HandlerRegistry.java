@@ -165,14 +165,28 @@ public class HandlerRegistry implements BotDispatcher {
             Object[] argsArray = new Object[params.length];
             for (int i = 0; i < params.length; i++) {
                 Parameter param = params[i];
-                if (OB11Event.class.isAssignableFrom(param.getType())) {
-                    argsArray[i] = event;
-                } else if (CommandHandler.CommandArgs.class.isAssignableFrom(param.getType())) {
+                Class<?> paramType = param.getType();
+                
+                if (OB11Event.class.isAssignableFrom(paramType)) {
+                    if (paramType.isInstance(event)) {
+                        argsArray[i] = event;
+                    } else {
+                        log.warn("Event type mismatch: expected {}, got {}. Setting to null.", 
+                                paramType.getSimpleName(), event.getClass().getSimpleName());
+                        argsArray[i] = null;
+                    }
+                } else if (CommandHandler.CommandArgs.class.isAssignableFrom(paramType)) {
                     argsArray[i] = args;
                 } else if (param.isAnnotationPresent(Param.class)) {
                     String key = param.getAnnotation(Param.class).value();
                     String value = args.get(key);
-                    argsArray[i] = convertType(value, param.getType());
+                    try {
+                        argsArray[i] = convertType(value, paramType);
+                    } catch (Exception e) {
+                        log.error("Failed to convert parameter '{}' with value '{}' to type {}: {}", 
+                                key, value, paramType.getSimpleName(), e.getMessage());
+                        argsArray[i] = null;
+                    }
                 } else {
                     argsArray[i] = null;
                 }
@@ -195,8 +209,17 @@ public class HandlerRegistry implements BotDispatcher {
             Parameter[] params = method.getParameters();
             Object[] argsArray = new Object[params.length];
             for (int i = 0; i < params.length; i++) {
-                if (params[i].getType().isInstance(event)) {
-                    argsArray[i] = event;
+                Parameter param = params[i];
+                Class<?> paramType = param.getType();
+                
+                if (OB11Event.class.isAssignableFrom(paramType)) {
+                    if (paramType.isInstance(event)) {
+                        argsArray[i] = event;
+                    } else {
+                        log.warn("Event type mismatch: expected {}, got {}. Setting to null.", 
+                                paramType.getSimpleName(), event.getClass().getSimpleName());
+                        argsArray[i] = null;
+                    }
                 } else {
                     argsArray[i] = null;
                 }
@@ -228,9 +251,30 @@ public class HandlerRegistry implements BotDispatcher {
     private Object convertType(String value, Class<?> type) {
         if (value == null) return null;
         if (type == String.class) return value;
-        if (type == int.class || type == Integer.class) return Integer.parseInt(value);
-        if (type == long.class || type == Long.class) return Long.parseLong(value);
-        if (type == double.class || type == Double.class) return Double.parseDouble(value);
+        if (type == int.class || type == Integer.class) {
+            try {
+                return Integer.parseInt(value);
+            } catch (NumberFormatException e) {
+                log.warn("Failed to parse integer from '{}': {}", value, e.getMessage());
+                return null;
+            }
+        }
+        if (type == long.class || type == Long.class) {
+            try {
+                return Long.parseLong(value);
+            } catch (NumberFormatException e) {
+                log.warn("Failed to parse long from '{}': {}", value, e.getMessage());
+                return null;
+            }
+        }
+        if (type == double.class || type == Double.class) {
+            try {
+                return Double.parseDouble(value);
+            } catch (NumberFormatException e) {
+                log.warn("Failed to parse double from '{}': {}", value, e.getMessage());
+                return null;
+            }
+        }
         if (type == boolean.class || type == Boolean.class) {
             return "true".equalsIgnoreCase(value) || "1".equals(value) || "yes".equalsIgnoreCase(value);
         }

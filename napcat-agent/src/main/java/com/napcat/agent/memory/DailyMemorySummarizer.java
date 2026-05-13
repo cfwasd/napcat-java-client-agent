@@ -31,6 +31,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class DailyMemorySummarizer {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    private static final java.time.ZoneId UTC = java.time.ZoneId.of("UTC");
     private static final int MAX_CONCURRENT_SUMMARY = 4;
 
     @Autowired
@@ -59,7 +60,7 @@ public class DailyMemorySummarizer {
             return;
         }
 
-        String today = LocalDate.now().format(DATE_FMT);
+        String today = LocalDate.now(UTC).format(DATE_FMT);
         AtomicInteger summarized = new AtomicInteger(0);
         AtomicInteger skipped = new AtomicInteger(0);
 
@@ -147,14 +148,7 @@ public class DailyMemorySummarizer {
     }
 
     private String formatSessionHistory(com.napcat.agent.session.Session session) {
-        StringBuilder sb = new StringBuilder();
-        for (var msg : session.getHistory()) {
-            if ("user".equals(msg.getRole()) || "assistant".equals(msg.getRole())) {
-                sb.append("[").append(msg.getRole()).append("]: ")
-                        .append(msg.getContent() != null ? msg.getContent() : "").append("\n");
-            }
-        }
-        return sb.toString().trim();
+        return session.getFormattedHistory();
     }
 
     /**
@@ -185,6 +179,8 @@ public class DailyMemorySummarizer {
                     AgentConfig.builder()
                             .maxRounds(1)
                             .systemPrompt("你是一个用户画像归纳助手。将历史摘要和当日新记忆合并为一段连贯、去重的累积摘要。")
+                            .internalCall(true)
+                            .disableTools(true)
                             .build(),
                     null)
                     .get(60, java.util.concurrent.TimeUnit.SECONDS);
@@ -200,9 +196,8 @@ public class DailyMemorySummarizer {
      * 简单拼接归纳（无 LLM 时使用）。
      */
     private String summarizeSimple(String rawMemories) {
-        if (rawMemories.length() > 500) {
-            return rawMemories.substring(0, 500) + "…";
-        }
-        return rawMemories;
+        if (rawMemories.length() <= 500) return rawMemories;
+        int end = rawMemories.offsetByCodePoints(0, 500);
+        return rawMemories.substring(0, end) + "…";
     }
 }
